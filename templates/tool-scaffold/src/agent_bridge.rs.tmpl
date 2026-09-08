@@ -53,6 +53,8 @@ impl InvocationContext {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct AgentBridgeContext {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    artifact_root: Option<PathBuf>,
     current_depth: u32,
     max_depth: u32,
     runtime_budget: RuntimeBudget,
@@ -94,8 +96,16 @@ impl AgentBridgeContext {
             )));
         }
 
-        let invocation = resolve_child_artifact_invocation(request.artifact.as_str())?;
-        let mut command = child_artifact_command(&invocation, request.artifact.as_str());
+        let artifact_path =
+            resolve_child_artifact_path(request.artifact.as_str(), self.artifact_root.as_deref())?;
+        let artifact = artifact_path
+            .to_str()
+            .ok_or_else(|| ToolError::new("Child artifact path must be Unicode"))?;
+        let invocation = resolve_child_artifact_invocation(artifact)?;
+        let mut command = child_artifact_command(&invocation, artifact);
+        if let Some(root) = self.artifact_root.as_ref() {
+            command.current_dir(root);
+        }
         let command_line_args = request.command_line_args()?;
         if let Some(action_execution) = request.action_execution.or(self.action_execution) {
             command.arg("--action-execution");
@@ -406,14 +416,50 @@ fn validate_child_agent_target(artifact: &str) -> Result<(), ToolError> {
         )));
     }
 
-    if !Path::new(artifact).exists() {
+    Ok(())
+}
+
+fn resolve_child_artifact_path(artifact: &str, root: Option<&Path>) -> Result<PathBuf, ToolError> {
+    let path = match root {
+        Some(root) => {
+            let metadata = std::fs::symlink_metadata(root)
+                .map_err(|error| ToolError::new(error.to_string()))?;
+            if bridge_path_is_link(&metadata) || !metadata.is_dir() {
+                return Err(ToolError::new(
+                    "Child artifact root must be a real directory, not a link or reparse point",
+                ));
+            }
+            root.join(artifact)
+        }
+        None => PathBuf::from(artifact),
+    };
+    if !path.exists() {
         return Err(ToolError::new(format!(
             "Child-agent target '{}' was not found relative to the current working directory.",
             artifact
         )));
     }
 
-    Ok(())
+    let metadata =
+        std::fs::symlink_metadata(&path).map_err(|error| ToolError::new(error.to_string()))?;
+    if root.is_some() && (bridge_path_is_link(&metadata) || !metadata.is_file()) {
+        return Err(ToolError::new(
+            "Child artifact must be a regular file, not a link or reparse point",
+        ));
+    }
+    Ok(path)
+}
+
+fn bridge_path_is_link(metadata: &std::fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        metadata.file_attributes() & 0x400 != 0
+    }
+    #[cfg(not(windows))]
+    {
+        metadata.file_type().is_symlink()
+    }
 }
 
 fn artifact_is_json_definition(artifact: &str) -> bool {

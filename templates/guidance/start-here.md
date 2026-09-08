@@ -98,3 +98,7 @@ When the user wants to share, install, update, or roll back reusable agents/tool
 - Remember that runtime input flags replace the full baked `inputs` array unless the caller sets `--input-mode append` or `--input-mode prepend`. If a run still needs text instructions plus a runtime file, URL, or image in replace mode, supply both kinds of runtime inputs.
 - Prefer boxed ASCII diagrams for explanations by default.
 - If Mermaid rendering is clearly supported, offer it as an option and ask whether the user wants it.
+
+## Local Data Ownership
+
+Inspect `.cargo-ai/project.toml` before choosing output paths. `cargo ai new` sets `[runtime] data_root = ".cargo-ai/data"`; `cargo ai init` leaves adoption explicit for existing work. Do not add or remove it silently. In an opted-in project, writing tools and Cargo AI-controlled outputs use the fixed project data root. Keep definitions, immutable inputs, and source code outside it. Read `tool-authoring.md`, `tool-child-agents.md`, and `package-workflow.md` before adapting older tool paths or shipping a project.

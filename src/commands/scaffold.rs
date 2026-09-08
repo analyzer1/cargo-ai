@@ -8,7 +8,8 @@ use std::process::{Command, Stdio};
 
 const GITIGNORE_BEGIN_MARKER: &str = "# BEGIN cargo-ai managed artifacts";
 const GITIGNORE_END_MARKER: &str = "# END cargo-ai managed artifacts";
-const GITIGNORE_ENTRIES: [&str; 8] = [
+const GITIGNORE_ENTRIES: [&str; 9] = [
+    "/.cargo-ai/data/",
     "AGENTS.md",
     "CLAUDE.md",
     ".cargo-ai/guidance/",
@@ -170,9 +171,20 @@ fn scaffold_in_place(
     vcs_mode: VcsMode,
     allow_existing_metadata: bool,
 ) -> Result<ScaffoldReport, String> {
-    let metadata_path = target_dir.join(".cargo-ai").join("project.toml");
+    let metadata_path = super::runtime_data::confined_path(
+        target_dir,
+        Path::new(".cargo-ai/project.toml"),
+        "Project metadata",
+    )?;
     let metadata_exists = metadata_path.exists();
     let gitignore_path = target_dir.join(".gitignore");
+    if vcs_mode == VcsMode::Git {
+        super::runtime_data::confined_path(
+            target_dir,
+            Path::new(".gitignore"),
+            "Project ignore file",
+        )?;
+    }
 
     let mut managed_paths = Vec::new();
     if !metadata_exists || !allow_existing_metadata {
@@ -180,6 +192,18 @@ fn scaffold_in_place(
     }
 
     ensure_no_conflicts(&managed_paths)?;
+    // Validate existing metadata before Git initialization or any managed write.
+    if metadata_exists {
+        let contents = fs::read_to_string(&metadata_path)
+            .map_err(|error| format!("Failed to read project metadata: {error}"))?;
+        toml::from_str::<ProjectMetadataDocument>(&contents).map_err(|error| {
+            format!(
+                "Failed to parse project metadata '{}': {error}",
+                metadata_path.display()
+            )
+        })?;
+        super::runtime_data::uses_project_data(&contents)?;
+    }
 
     let git_setup = setup_git(target_dir, vcs_mode)?;
     let include_git_metadata = vcs_mode == VcsMode::Git && git_setup != GitSetup::Skipped;
@@ -198,6 +222,7 @@ fn scaffold_in_place(
         &metadata_path,
         include_git_metadata,
         default_project_name(target_dir),
+        !allow_existing_metadata,
     )?;
     let gitignore_status = ensure_gitignore(&gitignore_path, include_git_metadata)?;
 
@@ -274,6 +299,7 @@ fn write_project_metadata(
     metadata_path: &Path,
     include_git_metadata: bool,
     default_project_name: String,
+    adopt_data: bool,
 ) -> Result<ManagedFileStatus, String> {
     let existing = match fs::read_to_string(metadata_path) {
         Ok(contents) => Some(contents),
@@ -290,7 +316,8 @@ fn write_project_metadata(
         existing.as_deref(),
         include_git_metadata,
         default_project_name.as_str(),
-    );
+        adopt_data,
+    )?;
 
     let status = match existing.as_deref() {
         None => ManagedFileStatus::Created,
@@ -315,10 +342,26 @@ fn render_project_metadata(
     existing: Option<&str>,
     include_git_metadata: bool,
     default_project_name: &str,
-) -> String {
-    let mut document = existing
-        .and_then(|contents| toml::from_str::<ProjectMetadataDocument>(contents).ok())
-        .unwrap_or_default();
+    adopt_data: bool,
+) -> Result<String, String> {
+    let mut document = match existing {
+        Some(contents) => toml::from_str::<ProjectMetadataDocument>(contents)
+            .map_err(|error| format!("Failed to parse project metadata: {error}"))?,
+        None => ProjectMetadataDocument::default(),
+    };
+    if adopt_data {
+        let runtime = document
+            .extra
+            .entry("runtime".to_string())
+            .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+        runtime
+            .as_table_mut()
+            .ok_or("Project runtime must be a table")?
+            .insert(
+                "data_root".to_string(),
+                toml::Value::String(super::runtime_data::PROJECT_DATA_PATH.to_string()),
+            );
+    }
     document.format_version = 1;
     document.vcs = include_git_metadata.then(|| "git".to_string());
     document.extra.remove("tool");
@@ -359,7 +402,7 @@ fn render_project_metadata(
     if !rendered.ends_with('\n') {
         rendered.push('\n');
     }
-    rendered
+    Ok(rendered)
 }
 
 fn ensure_gitignore(
@@ -394,6 +437,21 @@ fn ensure_gitignore(
     let rendered = match existing {
         None => block,
         Some(mut contents) => {
+            if let (Some(begin), Some(end)) = (
+                contents.find(GITIGNORE_BEGIN_MARKER),
+                contents.find(GITIGNORE_END_MARKER),
+            ) {
+                if begin < end {
+                    let managed = &contents[begin..end];
+                    let missing = GITIGNORE_ENTRIES
+                        .iter()
+                        .filter(|entry| !managed.lines().any(|line| line.trim() == **entry))
+                        .map(|entry| format!("{entry}\n"))
+                        .collect::<String>();
+                    contents.insert_str(end, &missing);
+                    return write_gitignore(gitignore_path, &contents);
+                }
+            }
             if !contents.ends_with('\n') {
                 contents.push('\n');
             }
@@ -405,6 +463,10 @@ fn ensure_gitignore(
         }
     };
 
+    write_gitignore(gitignore_path, &rendered)
+}
+
+fn write_gitignore(gitignore_path: &Path, rendered: &str) -> Result<ManagedFileStatus, String> {
     let status = if gitignore_path.exists() {
         ManagedFileStatus::Updated
     } else {
@@ -855,5 +917,81 @@ existing = true\n",
         assert_eq!(second.gitignore_status, ManagedFileStatus::Unchanged);
 
         let _ = fs::remove_dir_all(dir);
+    }
+    #[test]
+    fn new_adopts_data_but_init_preserves_legacy_and_explicit_metadata() {
+        let root = temp_dir_path("runtime-data");
+        scaffold_new(&root, VcsMode::None).unwrap();
+        let metadata = root.join(".cargo-ai/project.toml");
+        assert!(super::super::runtime_data::uses_project_data(
+            &fs::read_to_string(&metadata).unwrap()
+        )
+        .unwrap());
+        assert!(!root.join(".cargo-ai/data").exists());
+        fs::write(
+            &metadata,
+            "[project]\nname = 'kept'\nversion = '2.0.0'\n[custom]\nvalue = 'keep'\n",
+        )
+        .unwrap();
+        scaffold_init(&root, VcsMode::None).unwrap();
+        let legacy = fs::read_to_string(&metadata).unwrap();
+        assert!(!super::super::runtime_data::uses_project_data(&legacy).unwrap());
+        assert!(legacy.contains("kept") && legacy.contains("keep"));
+        fs::write(
+            &metadata,
+            format!("{legacy}\n[runtime]\ndata_root = '.cargo-ai/data'\n"),
+        )
+        .unwrap();
+        scaffold_init(&root, VcsMode::None).unwrap();
+        assert!(super::super::runtime_data::uses_project_data(
+            &fs::read_to_string(metadata).unwrap()
+        )
+        .unwrap());
+        assert!(!root.join(".cargo-ai/data").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn malformed_metadata_fails_before_git_or_file_mutation() {
+        let root = temp_dir_path("malformed-preserve");
+        fs::create_dir_all(root.join(".cargo-ai")).unwrap();
+        let metadata = root.join(".cargo-ai/project.toml");
+        let bytes = "[project\nname = 'do not replace'\n";
+        fs::write(&metadata, bytes).unwrap();
+        fs::write(root.join("AGENTS.md"), "user instructions").unwrap();
+        assert!(scaffold_init(&root, VcsMode::Git).is_err());
+        assert_eq!(fs::read_to_string(metadata).unwrap(), bytes);
+        assert_eq!(
+            fs::read_to_string(root.join("AGENTS.md")).unwrap(),
+            "user instructions"
+        );
+        assert!(!root.join(".git").exists());
+        assert!(!root.join(".gitignore").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn data_ignore_updates_one_managed_block_and_preserves_user_entries() {
+        let root = temp_dir_path("ignore-data");
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join(".gitignore");
+        let old = format!(
+            "user-before\n{}\ncustom-managed\nAGENTS.md\n{}\nuser-after\n",
+            super::GITIGNORE_BEGIN_MARKER,
+            super::GITIGNORE_END_MARKER
+        );
+        fs::write(&path, old).unwrap();
+        super::ensure_gitignore(&path, true).unwrap();
+        let rendered = fs::read_to_string(&path).unwrap();
+        assert_eq!(rendered.matches(super::GITIGNORE_BEGIN_MARKER).count(), 1);
+        assert_eq!(rendered.matches("/.cargo-ai/data/").count(), 1);
+        assert!(rendered.starts_with("user-before\n") && rendered.ends_with("user-after\n"));
+        assert!(rendered.contains("custom-managed\n"));
+        assert!(!rendered.lines().any(|line| line == "/data/"));
+        assert_eq!(
+            super::ensure_gitignore(&path, true).unwrap(),
+            ManagedFileStatus::Unchanged
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 }

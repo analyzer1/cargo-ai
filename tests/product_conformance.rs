@@ -179,3 +179,512 @@ fn real_cli_package_lifecycle_is_isolated_and_fail_closed() {
         "unchanged"
     );
 }
+
+fn data_cli(fixture: &Fixture, root: &std::path::Path, args: &[&str]) -> std::process::Output {
+    data_command(fixture, env!("CARGO_BIN_EXE_cargo-ai"), root)
+        .arg("--no-update-check")
+        .args(args)
+        .output()
+        .expect("CLI should start")
+}
+
+fn data_command(
+    fixture: &Fixture,
+    program: impl AsRef<std::ffi::OsStr>,
+    root: &std::path::Path,
+) -> std::process::Command {
+    let mut paths = vec![std::path::Path::new(env!("CARGO_BIN_EXE_cargo-ai"))
+        .parent()
+        .unwrap()
+        .to_path_buf()];
+    paths.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    let mut command = fixture.command(program, root);
+    command.env("PATH", std::env::join_paths(paths).unwrap());
+    command
+}
+
+fn structural_definition(program: &str, args: &[&str]) -> serde_json::Value {
+    serde_json::json!({
+        "agent_definition_schema_version": "2026-03-03.r1",
+        "inputs": [{"type":"text", "name":"job", "text":"local fixture"}],
+        "agent_schema": {"type":"object", "properties":{}},
+        "actions": [{"name":"probe", "logic":{"==":[1,1]}, "run":[{"kind":"exec", "program":program, "args":args}]}]
+    })
+}
+
+#[test]
+fn project_data_assembly_excludes_mutable_files_and_preserves_rejected_outputs() {
+    let fixture = Fixture::new("data-assembly");
+    let project = fixture.root.join("project");
+    assert_success(
+        &data_cli(
+            &fixture,
+            &fixture.root,
+            &["new", project.to_str().unwrap(), "--vcs", "none"],
+        ),
+        "new",
+    );
+    assert!(!project.join(".cargo-ai/data").exists());
+    let metadata = project.join(".cargo-ai/project.toml");
+    let base = fs::read_to_string(&metadata).unwrap();
+    assert!(base.contains("data_root = \".cargo-ai/data\""));
+    fs::write(
+        project.join("agent.json"),
+        structural_definition("cargo", &["--version"]).to_string(),
+    )
+    .unwrap();
+    fs::create_dir_all(project.join(".cargo-ai/data")).unwrap();
+    fs::write(
+        project.join(".cargo-ai/data/private-state.txt"),
+        "private runtime sentinel",
+    )
+    .unwrap();
+    fs::create_dir_all(project.join("assets/nested/.cargo-ai/data")).unwrap();
+    fs::write(
+        project.join("assets/nested/.cargo-ai/data/auth.json"),
+        "fake credential sentinel",
+    )
+    .unwrap();
+    fs::write(project.join("assets/seed.txt"), "immutable seed").unwrap();
+    for file in ["AGENTS.md", "CLAUDE.md", "user.txt"] {
+        fs::write(project.join(file), "user-owned sentinel").unwrap();
+    }
+    assert_success(
+        &fixture
+            .command("git", &project)
+            .arg("init")
+            .output()
+            .unwrap(),
+        "fixture Git init",
+    );
+    assert_success(
+        &fixture
+            .command("git", &project)
+            .args([
+                "add",
+                "-f",
+                ".cargo-ai/data",
+                "AGENTS.md",
+                "CLAUDE.md",
+                "user.txt",
+            ])
+            .output()
+            .unwrap(),
+        "fixture tracked data",
+    );
+    let index = fs::read(project.join(".git/index")).unwrap();
+    for operation in ["build", "package"] {
+        fs::write(&metadata, format!("{base}\n[build.default]\nagent_definitions = ['agent.json']\nassets = ['assets']\n")).unwrap();
+        let output = fixture.root.join(operation);
+        let command = data_cli(
+            &fixture,
+            &project,
+            &[
+                operation,
+                "default",
+                "--output-dir",
+                output.to_str().unwrap(),
+            ],
+        );
+        assert_success(&command, operation);
+        assert!(!output.join(".cargo-ai/data").exists());
+        assert!(!output.join("assets/nested/.cargo-ai/data").exists());
+        assert_eq!(
+            fs::read_to_string(output.join("assets/seed.txt")).unwrap(),
+            "immutable seed"
+        );
+        assert!(fs::read_to_string(output.join(".cargo-ai/project.toml"))
+            .unwrap()
+            .contains("data_root = \".cargo-ai/data\""));
+        fs::write(output.join("keep.txt"), "preserve output").unwrap();
+        for input in [".cargo-ai", ".cargo-ai/data/private-state.txt"] {
+            fs::write(
+                &metadata,
+                format!("{base}\n[build.default]\nassets = ['{input}']\n"),
+            )
+            .unwrap();
+            let rejected = data_cli(
+                &fixture,
+                &project,
+                &[
+                    operation,
+                    "default",
+                    "--output-dir",
+                    output.to_str().unwrap(),
+                    "--force",
+                ],
+            );
+            assert!(!rejected.status.success(), "{}", output_text(&rejected));
+            assert_eq!(
+                fs::read_to_string(output.join("keep.txt")).unwrap(),
+                "preserve output"
+            );
+        }
+        fs::write(
+            &metadata,
+            format!("{base}\n[build.default]\nassets = ['assets']\n"),
+        )
+        .unwrap();
+        for destination in [project.join(".cargo-ai/data"), project.join("assets")] {
+            let rejected = data_cli(
+                &fixture,
+                &project,
+                &[
+                    operation,
+                    "default",
+                    "--output-dir",
+                    destination.to_str().unwrap(),
+                    "--force",
+                ],
+            );
+            assert!(!rejected.status.success(), "{}", output_text(&rejected));
+            assert_eq!(
+                fs::read_to_string(project.join("assets/seed.txt")).unwrap(),
+                "immutable seed"
+            );
+        }
+        #[cfg(unix)]
+        {
+            let external = fixture.root.join("external.txt");
+            fs::write(&external, "external sentinel").unwrap();
+            let link = project.join("assets/linked.txt");
+            std::os::unix::fs::symlink(&external, &link).unwrap();
+            let rejected = data_cli(
+                &fixture,
+                &project,
+                &[
+                    operation,
+                    "default",
+                    "--output-dir",
+                    output.to_str().unwrap(),
+                    "--force",
+                ],
+            );
+            assert!(!rejected.status.success());
+            assert_eq!(
+                fs::read_to_string(output.join("keep.txt")).unwrap(),
+                "preserve output"
+            );
+            assert_eq!(fs::read_to_string(external).unwrap(), "external sentinel");
+            fs::remove_file(link).unwrap();
+        }
+    }
+    assert_eq!(fs::read(project.join(".git/index")).unwrap(), index);
+    for file in ["AGENTS.md", "CLAUDE.md", "user.txt"] {
+        assert_eq!(
+            fs::read_to_string(project.join(file)).unwrap(),
+            "user-owned sentinel"
+        );
+    }
+    assert_eq!(
+        fs::read_to_string(project.join(".cargo-ai/data/private-state.txt")).unwrap(),
+        "private runtime sentinel"
+    );
+}
+
+#[test]
+fn writing_tool_keeps_sibling_children_across_interpreted_generated_and_installed_runs() {
+    let fixture = Fixture::new("data-tool");
+    let project = fixture.root.join("project");
+    assert_success(
+        &data_cli(
+            &fixture,
+            &fixture.root,
+            &["new", project.to_str().unwrap(), "--vcs", "none"],
+        ),
+        "new",
+    );
+    assert_success(
+        &data_cli(
+            &fixture,
+            &project,
+            &[
+                "profile",
+                "add",
+                "fixture",
+                "--server",
+                "ollama",
+                "--model",
+                "fixture",
+                "--default",
+            ],
+        ),
+        "isolated profile",
+    );
+    assert_success(
+        &data_cli(&fixture, &project, &["add", "tool", "writer"]),
+        "scaffold tool",
+    );
+    let tool_path = project.join("tools/writer/src/tool.rs");
+    let mut tool = fs::read_to_string(&tool_path).unwrap();
+    for resource in ["filesystem_read", "filesystem_write", "subprocess"] {
+        tool = tool.replace(
+            &format!("{resource}: AccessLevel::None"),
+            &format!("{resource}: AccessLevel::Required"),
+        );
+    }
+    tool.truncate(tool.find("pub(crate) fn invoke(").unwrap());
+    tool.push_str(r#"
+pub(crate) fn invoke(_params: BTreeMap<String, Value>, context: InvocationContext) -> Result<Option<String>, ToolError> {
+    std::fs::write("result.txt", "owned output").map_err(|e| ToolError::new(e.to_string()))?;
+    let binary = if cfg!(windows) { "./child_probe.exe" } else { "./child_probe" };
+    let child = context.invoke_agent(ChildAgentRequest::new(binary))?;
+    if !child.stdout.contains("immutable seed") { return Err(ToolError::new("immutable input was lost")); }
+    let json_child = context.invoke_agent(ChildAgentRequest::new("./child.json"))?;
+    if !json_child.stdout.contains("cargo ") { return Err(ToolError::new("JSON child did not execute")); }
+    for target in ["../child.json", "./nested/child.json", "/child.json", "./missing-child", "./linked-child"] {
+        if context.invoke_agent(ChildAgentRequest::new(target)).is_ok() { return Err(ToolError::new("invalid child path accepted")); }
+    }
+    Ok(Some("children verified".to_string()))
+}
+"#);
+    fs::write(&tool_path, &tool).unwrap();
+    fs::write(project.join("seed.txt"), "immutable seed").unwrap();
+    fs::write(
+        project.join("probe.rs"),
+        "fn main() { println!(\"{}\", std::fs::read_to_string(\"seed.txt\").unwrap()); }",
+    )
+    .unwrap();
+    let binary_name = if cfg!(windows) {
+        "child_probe.exe"
+    } else {
+        "child_probe"
+    };
+    assert_success(
+        &fixture
+            .command("rustc", &project)
+            .args(["probe.rs", "-o", binary_name])
+            .output()
+            .unwrap(),
+        "fixture executable",
+    );
+    fs::write(
+        project.join("child.json"),
+        structural_definition("cargo", &["--version"]).to_string(),
+    )
+    .unwrap();
+    let parent = serde_json::json!({
+        "agent_definition_schema_version":"2026-03-03.r1",
+        "inputs":[{"type":"text", "name":"job", "text":"local fixture"}],
+        "agent_schema":{"type":"object", "properties":{}},
+        "actions":[{"name":"write", "logic":{"==":[1,1]}, "run":[{"kind":"tool", "name":"writer", "params":{}}]}]
+    });
+    fs::write(project.join("parent.json"), parent.to_string()).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(project.join("child.json"), project.join("linked-child")).unwrap();
+    assert_success(
+        &data_cli(&fixture, &project, &["tools", "build", "writer"]),
+        "build tool",
+    );
+    assert!(!project.join(".cargo-ai/data").exists());
+    assert_success(
+        &data_cli(&fixture, &project, &["run", "--config", "parent.json"]),
+        "interpreted writing tool",
+    );
+    assert_eq!(
+        fs::read_to_string(project.join(".cargo-ai/data/result.txt")).unwrap(),
+        "owned output"
+    );
+    assert!(!project.join("result.txt").exists());
+    assert!(!project.join(".cargo-ai/data/child.json").exists());
+    fs::remove_file(project.join(".cargo-ai/data/result.txt")).unwrap();
+    assert_success(
+        &data_cli(
+            &fixture,
+            &project,
+            &["hatch", "owned", "--config", "parent.json"],
+        ),
+        "hatch writing parent",
+    );
+    let generated = project.join(if cfg!(windows) { "owned.exe" } else { "owned" });
+    assert_success(
+        &data_command(&fixture, &generated, &project)
+            .output()
+            .unwrap(),
+        "generated writing tool",
+    );
+    assert!(project.join(".cargo-ai/data/result.txt").is_file());
+    verify_project_image_paths(&fixture, &project);
+    #[cfg(unix)]
+    fs::remove_file(project.join("linked-child")).unwrap();
+    let metadata = project.join(".cargo-ai/project.toml");
+    let base = fs::read_to_string(&metadata).unwrap();
+    fs::write(
+        &metadata,
+        base.replace("data_root = \".cargo-ai/data\"\n", ""),
+    )
+    .unwrap();
+    assert_success(
+        &data_cli(&fixture, &project, &["run", "--config", "parent.json"]),
+        "legacy bridge cwd",
+    );
+    assert_eq!(
+        fs::read_to_string(project.join("result.txt")).unwrap(),
+        "owned output"
+    );
+    fs::create_dir_all(project.join("tools/writer/.cargo-ai/data")).unwrap();
+    fs::write(
+        project.join("tools/writer/.cargo-ai/data/private.txt"),
+        "source data sentinel",
+    )
+    .unwrap();
+    fs::write(metadata, format!("{base}\n[build.default]\nagent_definitions = ['parent.json', 'child.json']\ntools = ['writer']\nassets = ['seed.txt', '{binary_name}']\n")).unwrap();
+    let package = fixture.root.join("package");
+    assert_success(
+        &data_cli(
+            &fixture,
+            &project,
+            &[
+                "package",
+                "default",
+                "--output-dir",
+                package.to_str().unwrap(),
+            ],
+        ),
+        "package writer",
+    );
+    assert!(!package.join(".cargo-ai/data").exists());
+    assert!(!package.join("tools/writer/.cargo-ai/data").exists());
+    let recipient = Fixture::new("recipient");
+    assert_success(
+        &data_cli(
+            &recipient,
+            &recipient.root,
+            &[
+                "profile",
+                "add",
+                "fixture",
+                "--server",
+                "ollama",
+                "--model",
+                "fixture",
+                "--default",
+            ],
+        ),
+        "recipient isolated profile",
+    );
+    assert_success(
+        &data_cli(
+            &recipient,
+            &recipient.root,
+            &[
+                "packages",
+                "install",
+                package.to_str().unwrap(),
+                "--as",
+                "owned",
+            ],
+        ),
+        "recipient install",
+    );
+    assert_success(
+        &data_cli(&recipient, &recipient.root, &["run", "owned::parent"]),
+        "recipient independent run",
+    );
+    assert!(!recipient.root.join("result.txt").exists());
+    assert_eq!(
+        fs::read_to_string(
+            recipient
+                .cargo_ai_home
+                .join("packages/owned/data/result.txt")
+        )
+        .unwrap(),
+        "owned output"
+    );
+    fs::write(&tool_path, tool.replace("owned output", "edited output")).unwrap();
+    // Rebuild edited author code while the installed recipient retains its own version.
+    assert_success(
+        &data_cli(&fixture, &project, &["tools", "build", "writer"]),
+        "retained source rebuild",
+    );
+    assert_success(
+        &data_cli(&fixture, &project, &["run", "--config", "parent.json"]),
+        "edited source run",
+    );
+    assert_eq!(
+        fs::read_to_string(project.join(".cargo-ai/data/result.txt")).unwrap(),
+        "edited output"
+    );
+    assert_eq!(
+        fs::read_to_string(
+            recipient
+                .cargo_ai_home
+                .join("packages/owned/data/result.txt")
+        )
+        .unwrap(),
+        "owned output"
+    );
+}
+
+fn verify_project_image_paths(fixture: &Fixture, project: &std::path::Path) {
+    fs::write(
+        project.join(".cargo-ai/data/reference.png"),
+        "fixture reference",
+    )
+    .unwrap();
+    let definition = serde_json::json!({
+        "agent_definition_schema_version":"2026-03-03.r1",
+        "runtime_vars":{"reference":{"type":"string","default":"reference.png"}},
+        "inputs":[{"type":"text","name":"job","text":"local fixture"}],
+        "agent_schema":{"type":"object","properties":{}},
+        "actions":[{"name":"image","logic":{"==":[1,1]},"run":[{
+            "kind":"generate_image","model":"gpt-image-2","prompt":"fixture",
+            "reference_images":[{"path":[{"var":"runtime.reference"}]}],"path":"image.png"
+        }]}]
+    });
+    fs::write(project.join("image.json"), definition.to_string()).unwrap();
+    assert_success(
+        &data_cli(
+            fixture,
+            project,
+            &["hatch", "image_writer", "--config", "image.json"],
+        ),
+        "hatch image writer",
+    );
+    for generated in [false, true] {
+        let server = OneShotHttpServer::json(
+            "/v1/images/edits",
+            serde_json::json!({"data":[{"b64_json":"aW1hZ2U="}]}),
+        );
+        let url = server.url.replace("/images/edits", "/chat/completions");
+        let mut command = if generated {
+            data_command(
+                fixture,
+                project.join(if cfg!(windows) {
+                    "image_writer.exe"
+                } else {
+                    "image_writer"
+                }),
+                project,
+            )
+        } else {
+            let mut command = data_command(fixture, env!("CARGO_BIN_EXE_cargo-ai"), project);
+            command.args(["--no-update-check", "run", "--config", "image.json"]);
+            command
+        };
+        let run = command
+            .args([
+                "--server",
+                "openai",
+                "--model",
+                "gpt-image-2",
+                "--url",
+                &url,
+                "--token",
+                "fixture-token",
+            ])
+            .output()
+            .unwrap();
+        assert_success(&run, "isolated image output with dynamic reference");
+        let request = server.finish();
+        assert!(request.contains("reference.png"));
+        assert_eq!(
+            fs::read(project.join(".cargo-ai/data/image.png")).unwrap(),
+            b"image"
+        );
+        assert!(!project.join("image.png").exists());
+        fs::remove_file(project.join(".cargo-ai/data/image.png")).unwrap();
+    }
+}

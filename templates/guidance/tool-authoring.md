@@ -167,3 +167,9 @@ If the user wants a local tool, ask the authoring assistant to:
 - use `tool-hardening.md` for dependency selection and completion review
 
 Do not invent a second tool runtime or manifest format beyond the current scaffold and `tool.json`.
+
+## Runtime Data and Relative Paths
+
+With `[runtime] data_root = ".cargo-ai/data"`, Cargo AI invokes tools with the project's `.cargo-ai/data/` as cwd, creating it at invocation time. Installed tools continue to use their alias `data/`. Without the project setting, existing cwd behavior remains. Use relative paths for mutable tool output and keep immutable assets with the project artifacts. This cwd choice is not a filesystem sandbox; accurately declare resources and obtain authorization for sensitive operations.
+
+New bridges resolve sibling child artifacts independently of the tool's data cwd. See `tool-child-agents.md`. Updating Cargo AI does not overwrite existing tool sources or bridges. Before an existing project adopts the data setting, review/rebuild its tool code and test child calls; do not copy children into data or silently replace user code to compensate for an old bridge.

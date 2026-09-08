@@ -1,3 +1,4 @@
+mod runtime_data;
 mod args;
 mod web_resources;
 mod config;
@@ -791,6 +792,7 @@ struct InvocationRuntimeBudget {
 
 #[derive(Debug, Clone)]
 struct ActionProviderContext {
+    project_data: Option<runtime_data::DataRoot>,
     provider: ProviderKind,
     profile_name: Option<String>,
     auth_mode: String,
@@ -3221,11 +3223,8 @@ async fn main() {
     let actions = actions();
     let ignore_tools = cmd_args.get_flag("ignore_tools");
     let tool_resolver = Arc::new(
-        ToolResolver::new(
-            project_root,
-            current_tool_target_triple(),
-        )
-        .with_bundled_root(bundled_tools_root_from_executable()),
+        ToolResolver::new(project_root.clone(), current_tool_target_triple())
+            .with_bundled_root(bundled_tools_root_from_executable()),
     );
     let usage_log_arg = cmd_args.get_one::<String>("usage_log").map(String::as_str);
     let usage_agent_info = generated_usage_agent_info();
@@ -3257,7 +3256,15 @@ async fn main() {
             exit_failure!();
         }
     }
+    let project_data = match runtime_data::project_data_root(project_root.as_deref()) {
+        Ok(context) => context,
+        Err(error) => {
+            eprintln!("{error}");
+            exit_failure!();
+        }
+    };
     let action_provider_context = ActionProviderContext {
+        project_data,
         provider,
         profile_name: selected_profile.as_ref().map(|profile| profile.name.clone()),
         auth_mode: resolved_invocation_auth_mode(
@@ -4371,11 +4378,17 @@ async fn run_tool_step(
         .usage_log
         .as_ref()
         .map(|usage_log| usage_log.tool_bridge_context(tool_name, action_name, Some(step_index)));
+    let artifact_root = if provider_context.project_data.is_some() {
+        Some(std::env::current_dir().map_err(|error| error.to_string())?)
+    } else {
+        None
+    };
     let request = serde_json::json!({
         "protocol_version": 1,
         "params": params,
         "runtime_context": {
             "agent_bridge": {
+                "artifact_root": artifact_root,
                 "current_depth": current_depth,
                 "max_depth": max_agent_depth,
                 "runtime_budget": {
@@ -4406,8 +4419,22 @@ async fn run_tool_step(
         action_runtime_timeout_message(action_name, runtime_budget, context.as_str())
     })?;
 
-    let child = tokio::process::Command::new(&contract.resolved.binary_path)
-        .arg("invoke")
+    let binary_path = if provider_context.project_data.is_some() {
+        std::fs::canonicalize(&contract.resolved.binary_path).map_err(|error| {
+            format!(
+                "Failed to resolve tool executable '{}': {error}",
+                contract.resolved.binary_path.display()
+            )
+        })?
+    } else {
+        contract.resolved.binary_path.clone()
+    };
+    let mut command = tokio::process::Command::new(&binary_path);
+    command.arg("invoke");
+    if let Some(root) = provider_context.project_data.as_ref() {
+        command.current_dir(root.ensure_directory()?);
+    }
+    let child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -4729,11 +4756,12 @@ async fn run_generate_image_step(
         step.reference_images.as_deref(),
         action_name,
     )?;
-    let reference_images = resolve_generate_image_reference_images(
+    let reference_images = resolve_generate_image_reference_images_with_data(
         step.reference_images.as_deref(),
         data,
         action_name,
         named_inputs,
+        provider_context.project_data.as_ref(),
     )?;
 
     let remaining = remaining_runtime_duration(
@@ -4868,6 +4896,10 @@ async fn run_generate_image_step(
 
     let output_path_ref = Path::new(output_path.as_str());
     validate_generated_image_output_path(output_path_ref, action_name)?;
+    let output_path_ref = match provider_context.project_data.as_ref() {
+        Some(root) => root.resolve(output_path_ref)?,
+        None => output_path_ref.to_path_buf(),
+    };
     if let Some(parent) = output_path_ref.parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent).map_err(|error| {
@@ -4881,7 +4913,7 @@ async fn run_generate_image_step(
         }
     }
 
-    std::fs::write(output_path_ref, image_bytes).map_err(|error| {
+    std::fs::write(&output_path_ref, image_bytes).map_err(|error| {
         format!(
             "Action '{}' failed to write generated image '{}': {}",
             action_name,
@@ -5059,6 +5091,7 @@ async fn resolve_generate_image_step_profile_context(
     }
 
     Ok(Some(ActionProviderContext {
+        project_data: None,
         provider,
         profile_name: Some(profile.name.clone()),
         auth_mode: profile_auth_mode_display(profile.auth_mode).to_string(),
@@ -5188,7 +5221,11 @@ async fn run_agent_step(
         command.arg("--ignore-tools");
     }
     if let Some(usage_log_path) = step.usage_log.as_deref() {
-        let resolved_usage_log_path = resolve_child_usage_log_path(usage_log_path, action_name)?;
+        let resolved_usage_log_path = resolve_child_usage_log_path_with_data(
+            usage_log_path,
+            action_name,
+            provider_context.project_data.as_ref(),
+        )?;
         ensure_child_usage_log_parent_exists(resolved_usage_log_path.as_path())?;
         command.arg("--usage-log");
         command.arg(resolved_usage_log_path.as_os_str());
@@ -5219,7 +5256,7 @@ async fn run_agent_step(
         command.arg("--profile");
         command.arg(profile_name);
     }
-    let (child_args, resolution_notes) = child_input_args(
+    let (child_args, resolution_notes) = child_input_args_with_data(
         step.run_vars.as_deref(),
         step.input_overrides.as_deref(),
         step.input_mode,
@@ -5227,6 +5264,7 @@ async fn run_agent_step(
         data,
         action_name,
         named_inputs,
+        provider_context.project_data.as_ref(),
     )?;
     for note in resolution_notes {
         print_action_line(action_index, action_name, note.as_str());
@@ -5478,10 +5516,22 @@ fn child_artifact_command(
     }
 }
 
+#[cfg(test)]
 fn resolve_child_usage_log_path(raw_path: &str, action_name: &str) -> Result<PathBuf, String> {
+    resolve_child_usage_log_path_with_data(raw_path, action_name, None)
+}
+
+fn resolve_child_usage_log_path_with_data(
+    raw_path: &str,
+    action_name: &str,
+    project_data: Option<&runtime_data::DataRoot>,
+) -> Result<PathBuf, String> {
     let path = Path::new(raw_path);
     validate_child_usage_log_path(path, action_name)?;
-    Ok(path.to_path_buf())
+    match project_data {
+        Some(root) => root.resolve(path),
+        None => Ok(path.to_path_buf()),
+    }
 }
 
 fn validate_child_usage_log_path(path: &Path, action_name: &str) -> Result<(), String> {
@@ -5905,6 +5955,7 @@ fn matching_run_steps<'a>(
         .collect()
 }
 
+#[cfg(test)]
 fn child_input_args(
     run_vars: Option<&[ActionRunVar]>,
     input_overrides: Option<&[ActionInputOverride]>,
@@ -5913,6 +5964,28 @@ fn child_input_args(
     data: &serde_json::Value,
     action_name: &str,
     named_inputs: &BTreeMap<String, Input>,
+) -> Result<(Vec<String>, Vec<String>), String> {
+    child_input_args_with_data(
+        run_vars,
+        input_overrides,
+        input_mode,
+        inputs,
+        data,
+        action_name,
+        named_inputs,
+        None,
+    )
+}
+
+fn child_input_args_with_data(
+    run_vars: Option<&[ActionRunVar]>,
+    input_overrides: Option<&[ActionInputOverride]>,
+    input_mode: Option<ActionInputMode>,
+    inputs: Option<&[ActionInput]>,
+    data: &serde_json::Value,
+    action_name: &str,
+    named_inputs: &BTreeMap<String, Input>,
+    project_data: Option<&runtime_data::DataRoot>,
 ) -> Result<(Vec<String>, Vec<String>), String> {
     let mut args = Vec::new();
     let mut notes = Vec::new();
@@ -6012,6 +6085,14 @@ fn child_input_args(
                         &format!("child-agent image path input {}", index + 1),
                     )?;
                     validate_child_input_path(&resolved, action_name, index + 1, "image")?;
+                    let resolved =
+                        match project_data.filter(|_| child_input_uses_dynamic_parts(path)) {
+                            Some(root) => root
+                                .resolve(Path::new(&resolved))?
+                                .to_string_lossy()
+                                .into_owned(),
+                            None => resolved,
+                        };
                     args.push("--input-image".to_string());
                     args.push(resolved.clone());
                     if child_input_uses_dynamic_parts(path) {
@@ -6031,6 +6112,14 @@ fn child_input_args(
                         &format!("child-agent file path input {}", index + 1),
                     )?;
                     validate_child_input_path(&resolved, action_name, index + 1, "file")?;
+                    let resolved =
+                        match project_data.filter(|_| child_input_uses_dynamic_parts(path)) {
+                            Some(root) => root
+                                .resolve(Path::new(&resolved))?
+                                .to_string_lossy()
+                                .into_owned(),
+                            None => resolved,
+                        };
                     validate_child_file_extension(&resolved, action_name, index + 1)?;
                     args.push("--input-file".to_string());
                     args.push(resolved.clone());
@@ -6265,11 +6354,28 @@ fn validate_generate_image_output_format_for_provider(
     Ok(())
 }
 
+#[cfg(test)]
 fn resolve_generate_image_reference_images(
     references: Option<&[GenerateImageReference]>,
     data: &serde_json::Value,
     action_name: &str,
     named_inputs: &BTreeMap<String, Input>,
+) -> Result<Vec<providers::ImageReference>, String> {
+    resolve_generate_image_reference_images_with_data(
+        references,
+        data,
+        action_name,
+        named_inputs,
+        None,
+    )
+}
+
+fn resolve_generate_image_reference_images_with_data(
+    references: Option<&[GenerateImageReference]>,
+    data: &serde_json::Value,
+    action_name: &str,
+    named_inputs: &BTreeMap<String, Input>,
+    project_data: Option<&runtime_data::DataRoot>,
 ) -> Result<Vec<providers::ImageReference>, String> {
     let Some(references) = references else {
         return Ok(Vec::new());
@@ -6279,13 +6385,14 @@ fn resolve_generate_image_reference_images(
     for (index, reference) in references.iter().enumerate() {
         let path = match reference {
             GenerateImageReference::Path { path } => {
-                resolve_string_parts(
+                let resolved = resolve_string_parts(
                     path,
                     data,
                     action_name,
                     &format!("reference_images[{}].path", index),
                 )
-                .map_err(|error| format!("Action '{}': {error}", action_name))?
+                .map_err(|error| format!("Action '{}': {error}", action_name))?;
+                resolved
             }
             GenerateImageReference::Named { input } => {
                 let named_input = named_inputs.get(input).ok_or_else(|| {
@@ -6320,14 +6427,26 @@ fn resolve_generate_image_reference_images(
         };
 
         validate_generate_image_reference_path(path.as_str(), action_name, index + 1)?;
-        resolved.push(providers::load_image_reference(path.as_str()).map_err(|error| {
-            format!(
-                "Action '{}' generate_image reference image {} could not be loaded: {}",
-                action_name,
-                index + 1,
-                error
-            )
-        })?);
+        let path = match (reference, project_data) {
+            (GenerateImageReference::Path { path: parts }, Some(root))
+                if child_input_uses_dynamic_parts(parts) =>
+            {
+                root.resolve(Path::new(&path))?
+                    .to_string_lossy()
+                    .into_owned()
+            }
+            _ => path,
+        };
+        resolved.push(
+            providers::load_image_reference(path.as_str()).map_err(|error| {
+                format!(
+                    "Action '{}' generate_image reference image {} could not be loaded: {}",
+                    action_name,
+                    index + 1,
+                    error
+                )
+            })?,
+        );
     }
 
     Ok(resolved)

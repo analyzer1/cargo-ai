@@ -169,3 +169,7 @@ version = "^1.2"
 Cargo AI verifies that a declared installed alias is hosted, has the declared source id, and matches the semver requirement before top-level run/hatch and child resolution. An undeclared local-source alias remains available for development, while a hosted declaration never binds a local alias. Package assembly preserves hosted declarations. A hosted package needs an accepted subprocess permission before it can invoke a cross-package child. A hatched binary resolves package children only while it is executed inside a Cargo AI project; it fails closed after being moved or launched without project context. It also requires `cargo ai` or `cargo-ai` on `PATH`, and that spawned Cargo AI process applies the full local/hosted identity and version policy.
 
 Do not introduce unqualified global lookup by bare agent or tool name. Package internals remain private unless they are exported as entrypoints.
+
+## Source Project Data
+
+An opted-in source project declares `[runtime] data_root = ".cargo-ai/data"`. Assembly preserves that setting but excludes the data directory, even if tracked in Git or nested in an asset/tool-source tree. Explicit declarations overlapping runtime data and conflicting output roots fail before replacement. Keep immutable assets outside runtime data and never place credentials in distributable assets. Installed aliases still use their own `data/`; they do not inherit the producer's mutable files. Build roots acquire independent data only when a writing action needs it.

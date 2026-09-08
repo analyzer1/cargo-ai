@@ -34,6 +34,10 @@ const TEMPLATE_SOURCES: &[TemplateSource] = &[
         source: "Targo.toml",
     },
     TemplateSource {
+        destination: "src/runtime_data.rs",
+        source: "src/runtime_data.rs",
+    },
+    TemplateSource {
         destination: "src/main.rs",
         source: "src/main.rs",
     },

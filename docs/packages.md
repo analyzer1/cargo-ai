@@ -69,6 +69,12 @@ Unless `--output-dir` is set, package output goes to `target/cargo-ai/package/<p
 
 Both commands accept `--output-dir`; replacing an existing explicit destination requires `--force`. Run `cargo ai package` and inspect the reported package, archive, and request sizes before publishing asset-heavy work. The current hosted path accepts an **Estimated request** of at most `5,500,000` bytes. Because that serialized request includes base64 and JSON overhead, the archive itself must be materially smaller.
 
+## Mutable data stays local
+
+Build and package assembly retain `[runtime] data_root = ".cargo-ai/data"` when the source project adopts it. They exclude runtime data independently of Git tracking, including nested `.cargo-ai/data/` directories in copied assets and tool sources. An explicit input declaration that includes the reserved root, or an output destination that overlaps it, fails before replacing existing output. Declare immutable assets individually or under an unrelated asset directory; never use the data root to distribute credentials or live state.
+
+A runnable build gets its own project data on first writing execution. An installed alias continues to use its separate `data/` directory, regardless of the source project's setting. Different projects and aliases do not share those files. See [project-owned runtime data](./projects-and-tools.md#project-owned-runtime-data) for adoption, path checks, and older-tool compatibility.
+
 ## Permission requests and publisher trust
 
 Hosted packages are default-deny for subprocess execution. Cargo AI does not infer permission from a declared tool. Omit `[package.permissions]` when no tool or subprocess is needed; unsupported permission keys or values fail packaging.

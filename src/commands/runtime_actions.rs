@@ -768,6 +768,7 @@ pub(crate) struct InvocationRuntimeBudget {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ActionProviderContext {
+    pub(crate) project_data: Option<super::runtime_data::DataRoot>,
     pub(crate) provider: crate::providers::ProviderKind,
     pub(crate) profile_name: Option<String>,
     pub(crate) auth_mode: String,
@@ -1661,11 +1662,26 @@ async fn run_tool_step(
         .usage_log
         .as_ref()
         .map(|usage_log| usage_log.tool_bridge_context(tool_name, action_name, Some(step_index)));
+    let artifact_root = if provider_context.project_data.is_some() {
+        Some(std::env::current_dir().map_err(|error| error.to_string())?)
+    } else if let Some(context) = provider_context.package_context.as_ref() {
+        Some(
+            context
+                .current_entrypoint_path
+                .as_deref()
+                .and_then(|entrypoint| Path::new(entrypoint).parent())
+                .map(|parent| context.package_payload_root.join(parent))
+                .unwrap_or_else(|| context.package_payload_root.clone()),
+        )
+    } else {
+        None
+    };
     let request = serde_json::json!({
         "protocol_version": 1,
         "params": params,
         "runtime_context": {
             "agent_bridge": {
+                "artifact_root": artifact_root,
                 "current_depth": current_depth,
                 "max_depth": max_agent_depth,
                 "runtime_budget": {
@@ -1696,10 +1712,22 @@ async fn run_tool_step(
         action_runtime_timeout_message(action_name, runtime_budget, context.as_str())
     })?;
 
-    let mut command = tokio::process::Command::new(&contract.resolved.binary_path);
+    let binary_path = if provider_context.project_data.is_some() {
+        std::fs::canonicalize(&contract.resolved.binary_path).map_err(|error| {
+            format!(
+                "Failed to resolve tool executable '{}': {error}",
+                contract.resolved.binary_path.display()
+            )
+        })?
+    } else {
+        contract.resolved.binary_path.clone()
+    };
+    let mut command = tokio::process::Command::new(&binary_path);
     command.arg("invoke");
     if let Some(context) = provider_context.package_context.as_ref() {
         command.current_dir(context.package_data_root.as_path());
+    } else if let Some(root) = provider_context.project_data.as_ref() {
+        command.current_dir(root.ensure_directory()?);
     }
     let child = command
         .stdin(Stdio::piped())
@@ -2106,12 +2134,13 @@ async fn run_generate_image_step(
         step.reference_images.as_deref(),
         action_name,
     )?;
-    let reference_images = resolve_generate_image_reference_images(
+    let reference_images = resolve_generate_image_reference_images_with_data(
         step.reference_images.as_deref(),
         data,
         action_name,
         named_inputs,
         provider_context.package_context.as_ref(),
+        provider_context.project_data.as_ref(),
     )?;
 
     let remaining = remaining_runtime_duration(
@@ -2247,10 +2276,11 @@ async fn run_generate_image_step(
     };
     let image_bytes = image_response.bytes;
 
-    let output_path_ref = resolve_generated_image_output_path(
+    let output_path_ref = resolve_generated_image_output_path_with_data(
         output_path.as_str(),
         action_name,
         provider_context.package_context.as_ref(),
+        provider_context.project_data.as_ref(),
     )?;
     if let Some(parent) = output_path_ref.parent() {
         if !parent.as_os_str().is_empty() {
@@ -2491,6 +2521,7 @@ async fn resolve_generate_image_step_profile_context(
     }
 
     Ok(Some(ActionProviderContext {
+        project_data: None,
         provider,
         profile_name: Some(profile.name.clone()),
         auth_mode: profile_auth_mode_display(profile.auth_mode).to_string(),
@@ -2635,10 +2666,11 @@ async fn run_agent_step_with_provider_context(
         command.arg("--ignore-tools");
     }
     if let Some(usage_log_path) = step.usage_log.as_deref() {
-        let resolved_usage_log_path = resolve_child_usage_log_path(
+        let resolved_usage_log_path = resolve_child_usage_log_path_with_data(
             usage_log_path,
             action_name,
             provider_context.package_context.as_ref(),
+            provider_context.project_data.as_ref(),
         )?;
         ensure_child_usage_log_parent_exists(resolved_usage_log_path.as_path())?;
         command.arg("--usage-log");
@@ -2671,7 +2703,7 @@ async fn run_agent_step_with_provider_context(
         command.arg("--profile");
         command.arg(profile_name);
     }
-    let (child_args, resolution_notes) = child_input_args_with_package_context(
+    let (child_args, resolution_notes) = child_input_args_in_context(
         step.run_vars.as_deref(),
         step.input_overrides.as_deref(),
         step.input_mode,
@@ -2680,6 +2712,7 @@ async fn run_agent_step_with_provider_context(
         action_name,
         named_inputs,
         provider_context.package_context.as_ref(),
+        provider_context.project_data.as_ref(),
     )?;
     for note in resolution_notes {
         print_action_line(action_index, action_name, note.as_str());
@@ -2850,6 +2883,7 @@ async fn run_agent_step(
     runtime_budget: InvocationRuntimeBudget,
 ) -> Result<StepExecutionOutcome, String> {
     let provider_context = ActionProviderContext {
+        project_data: None,
         provider: crate::providers::ProviderKind::OpenAi,
         profile_name: None,
         auth_mode: "none".to_string(),
@@ -3077,10 +3111,20 @@ fn child_artifact_command(invocation: &ChildArtifactInvocation) -> tokio::proces
     }
 }
 
+#[cfg(test)]
 fn resolve_child_usage_log_path(
     raw_path: &str,
     action_name: &str,
     package_context: Option<&crate::commands::local_packages::InstalledPackageRuntimeContext>,
+) -> Result<PathBuf, String> {
+    resolve_child_usage_log_path_with_data(raw_path, action_name, package_context, None)
+}
+
+fn resolve_child_usage_log_path_with_data(
+    raw_path: &str,
+    action_name: &str,
+    package_context: Option<&crate::commands::local_packages::InstalledPackageRuntimeContext>,
+    project_data: Option<&super::runtime_data::DataRoot>,
 ) -> Result<PathBuf, String> {
     let path = Path::new(raw_path);
     validate_child_usage_log_path(path, action_name)?;
@@ -3088,7 +3132,10 @@ fn resolve_child_usage_log_path(
         return crate::commands::local_packages::resolve_package_data_path(context, path)
             .map_err(|error| format!("Action '{}': {}", action_name, error));
     }
-    Ok(path.to_path_buf())
+    match project_data {
+        Some(root) => root.resolve(path),
+        None => Ok(path.to_path_buf()),
+    }
 }
 
 fn validate_child_usage_log_path(path: &Path, action_name: &str) -> Result<(), String> {
@@ -3861,6 +3908,7 @@ fn child_input_args(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 fn child_input_args_with_package_context(
     run_vars: Option<&[crate::ActionRunVar]>,
     input_overrides: Option<&[crate::ActionInputOverride]>,
@@ -3870,6 +3918,30 @@ fn child_input_args_with_package_context(
     action_name: &str,
     named_inputs: &BTreeMap<String, crate::Input>,
     package_context: Option<&crate::commands::local_packages::InstalledPackageRuntimeContext>,
+) -> Result<(Vec<String>, Vec<String>), String> {
+    child_input_args_in_context(
+        run_vars,
+        input_overrides,
+        input_mode,
+        inputs,
+        data,
+        action_name,
+        named_inputs,
+        package_context,
+        None,
+    )
+}
+
+fn child_input_args_in_context(
+    run_vars: Option<&[crate::ActionRunVar]>,
+    input_overrides: Option<&[crate::ActionInputOverride]>,
+    input_mode: Option<crate::ActionInputMode>,
+    inputs: Option<&[crate::ActionInput]>,
+    data: &serde_json::Value,
+    action_name: &str,
+    named_inputs: &BTreeMap<String, crate::Input>,
+    package_context: Option<&crate::commands::local_packages::InstalledPackageRuntimeContext>,
+    project_data: Option<&super::runtime_data::DataRoot>,
 ) -> Result<(Vec<String>, Vec<String>), String> {
     let mut args = Vec::new();
     let mut notes = Vec::new();
@@ -3976,13 +4048,14 @@ fn child_input_args_with_package_context(
                         action_name,
                         &format!("child-agent image path input {}", index + 1),
                     )?;
-                    let resolved = resolve_installed_child_input_path(
+                    let resolved = resolve_installed_child_input_path_with_data(
                         resolved_path.as_str(),
                         child_input_uses_dynamic_parts(path),
                         action_name,
                         index + 1,
                         "image",
                         package_context,
+                        project_data,
                     )?;
                     args.push("--input-image".to_string());
                     args.push(resolved.clone());
@@ -4002,13 +4075,14 @@ fn child_input_args_with_package_context(
                         action_name,
                         &format!("child-agent file path input {}", index + 1),
                     )?;
-                    let resolved = resolve_installed_child_input_path(
+                    let resolved = resolve_installed_child_input_path_with_data(
                         resolved_path.as_str(),
                         child_input_uses_dynamic_parts(path),
                         action_name,
                         index + 1,
                         "file",
                         package_context,
+                        project_data,
                     )?;
                     validate_child_file_extension(&resolved, action_name, index + 1)?;
                     args.push("--input-file".to_string());
@@ -4103,6 +4177,7 @@ fn child_override_looks_like_external_path(value: &str) -> bool {
         || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
 }
 
+#[cfg(test)]
 fn resolve_installed_child_input_path(
     raw_path: &str,
     dynamic: bool,
@@ -4111,9 +4186,34 @@ fn resolve_installed_child_input_path(
     input_kind: &str,
     package_context: Option<&crate::commands::local_packages::InstalledPackageRuntimeContext>,
 ) -> Result<String, String> {
+    resolve_installed_child_input_path_with_data(
+        raw_path,
+        dynamic,
+        action_name,
+        input_index,
+        input_kind,
+        package_context,
+        None,
+    )
+}
+
+fn resolve_installed_child_input_path_with_data(
+    raw_path: &str,
+    dynamic: bool,
+    action_name: &str,
+    input_index: usize,
+    input_kind: &str,
+    package_context: Option<&crate::commands::local_packages::InstalledPackageRuntimeContext>,
+    project_data: Option<&super::runtime_data::DataRoot>,
+) -> Result<String, String> {
     validate_child_input_path(raw_path, action_name, input_index, input_kind)?;
     let Some(context) = package_context else {
-        return Ok(raw_path.to_string());
+        return match project_data.filter(|_| dynamic) {
+            Some(root) => root
+                .resolve(Path::new(raw_path))
+                .map(|path| path.to_string_lossy().into_owned()),
+            None => Ok(raw_path.to_string()),
+        };
     };
 
     let resolved = if dynamic {
@@ -4329,10 +4429,20 @@ fn validate_generate_image_output_format_for_provider(
     Ok(())
 }
 
+#[cfg(test)]
 fn resolve_generated_image_output_path(
     raw_path: &str,
     action_name: &str,
     package_context: Option<&crate::commands::local_packages::InstalledPackageRuntimeContext>,
+) -> Result<PathBuf, String> {
+    resolve_generated_image_output_path_with_data(raw_path, action_name, package_context, None)
+}
+
+fn resolve_generated_image_output_path_with_data(
+    raw_path: &str,
+    action_name: &str,
+    package_context: Option<&crate::commands::local_packages::InstalledPackageRuntimeContext>,
+    project_data: Option<&super::runtime_data::DataRoot>,
 ) -> Result<PathBuf, String> {
     let output_path_ref = Path::new(raw_path);
     validate_generated_image_output_path(output_path_ref, action_name)?;
@@ -4343,15 +4453,37 @@ fn resolve_generated_image_output_path(
         )
         .map_err(|error| format!("Action '{}': {}", action_name, error));
     }
-    Ok(output_path_ref.to_path_buf())
+    match project_data {
+        Some(root) => root.resolve(output_path_ref),
+        None => Ok(output_path_ref.to_path_buf()),
+    }
 }
 
+#[cfg(test)]
 fn resolve_generate_image_reference_images(
     references: Option<&[crate::GenerateImageReference]>,
     data: &serde_json::Value,
     action_name: &str,
     named_inputs: &BTreeMap<String, crate::Input>,
     package_context: Option<&crate::commands::local_packages::InstalledPackageRuntimeContext>,
+) -> Result<Vec<crate::providers::ImageReference>, String> {
+    resolve_generate_image_reference_images_with_data(
+        references,
+        data,
+        action_name,
+        named_inputs,
+        package_context,
+        None,
+    )
+}
+
+fn resolve_generate_image_reference_images_with_data(
+    references: Option<&[crate::GenerateImageReference]>,
+    data: &serde_json::Value,
+    action_name: &str,
+    named_inputs: &BTreeMap<String, crate::Input>,
+    package_context: Option<&crate::commands::local_packages::InstalledPackageRuntimeContext>,
+    project_data: Option<&super::runtime_data::DataRoot>,
 ) -> Result<Vec<crate::providers::ImageReference>, String> {
     let Some(references) = references else {
         return Ok(Vec::new());
@@ -4384,6 +4516,12 @@ fn resolve_generate_image_reference_images(
                         .map_err(|error| format!("Action '{}': {}", action_name, error))?
                     };
                     resolved.to_string_lossy().to_string()
+                } else if let Some(root) =
+                    project_data.filter(|_| child_input_uses_dynamic_parts(path))
+                {
+                    root.resolve(Path::new(&resolved))?
+                        .to_string_lossy()
+                        .into_owned()
                 } else {
                     resolved
                 }
@@ -4892,6 +5030,7 @@ mod tests {
 
     fn provider_context() -> ActionProviderContext {
         ActionProviderContext {
+            project_data: None,
             provider: ProviderKind::OpenAi,
             profile_name: Some("test_profile".to_string()),
             auth_mode: "api_key".to_string(),
@@ -4983,6 +5122,7 @@ auth_mode = "{auth_mode}"
 
     fn ollama_provider_context(server_url: &str, model: &str) -> ActionProviderContext {
         ActionProviderContext {
+            project_data: None,
             provider: ProviderKind::Ollama,
             profile_name: Some("ollama_profile".to_string()),
             auth_mode: "none".to_string(),
@@ -5960,6 +6100,7 @@ auth_mode = "{auth_mode}"
     #[test]
     fn using_line_hides_standard_openai_account_url() {
         let provider_context = ActionProviderContext {
+            project_data: None,
             provider: ProviderKind::OpenAi,
             profile_name: Some("codex_account".to_string()),
             auth_mode: "chatgpt_account".to_string(),
@@ -5981,6 +6122,7 @@ auth_mode = "{auth_mode}"
     #[test]
     fn using_line_includes_custom_url_when_material() {
         let provider_context = ActionProviderContext {
+            project_data: None,
             provider: ProviderKind::OpenAi,
             profile_name: None,
             auth_mode: "api_key".to_string(),
@@ -6177,6 +6319,7 @@ auth_mode = "{auth_mode}"
         let encoded_image = BASE64_STANDARD.encode(expected_bytes);
         let _mock = server
             .mock("POST", "/v1/images/generations")
+            .expect(2)
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(format!(
@@ -6218,6 +6361,7 @@ auth_mode = "{auth_mode}"
             platforms: None,
         };
         let provider_context = ActionProviderContext {
+            project_data: None,
             provider: ProviderKind::OpenAi,
             profile_name: Some("test_profile".to_string()),
             auth_mode: "api_key".to_string(),
@@ -6252,6 +6396,36 @@ auth_mode = "{auth_mode}"
             std::fs::read(&output_name).expect("generated image file should be written");
         let _ = std::fs::remove_file(&output_name);
         assert_eq!(written_bytes, expected_bytes);
+        let project = std::env::temp_dir().join(format!("image-data-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(project.join(".cargo-ai")).unwrap();
+        fs::write(
+            project.join(".cargo-ai/project.toml"),
+            "[runtime]\ndata_root = '.cargo-ai/data'",
+        )
+        .unwrap();
+        let mut project_context = provider_context.clone();
+        project_context.project_data =
+            crate::commands::runtime_data::project_data_root(Some(&project)).unwrap();
+        assert!(!project.join(".cargo-ai/data").exists());
+        run_generate_image_step(
+            &step,
+            &json!({"customer":"Acme"}),
+            &no_named_inputs(),
+            0,
+            "generate_art",
+            1,
+            &project_context,
+            runtime_budget,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            fs::read(project.join(".cargo-ai/data").join(&output_name)).unwrap(),
+            expected_bytes
+        );
+        assert!(!Path::new(&output_name).exists());
+        _mock.assert_async().await;
+        fs::remove_dir_all(project).unwrap();
     }
 
     #[tokio::test]
@@ -6323,6 +6497,7 @@ auth_mode = "{auth_mode}"
             },
         )]);
         let provider_context = ActionProviderContext {
+            project_data: None,
             provider: ProviderKind::OpenAi,
             profile_name: Some("test_profile".to_string()),
             auth_mode: "api_key".to_string(),
@@ -6471,6 +6646,7 @@ auth_mode = "{auth_mode}"
             platforms: None,
         };
         let provider_context = ActionProviderContext {
+            project_data: None,
             provider: ProviderKind::OpenAi,
             profile_name: Some("test_profile".to_string()),
             auth_mode: "api_key".to_string(),
@@ -6566,6 +6742,7 @@ auth_mode = "{auth_mode}"
             platforms: None,
         };
         let provider_context = ActionProviderContext {
+            project_data: None,
             provider: ProviderKind::OpenAi,
             profile_name: Some("test_profile".to_string()),
             auth_mode: "api_key".to_string(),
@@ -6636,6 +6813,7 @@ auth_mode = "{auth_mode}"
             platforms: None,
         };
         let provider_context = ActionProviderContext {
+            project_data: None,
             provider: ProviderKind::OpenAi,
             profile_name: Some("test_profile".to_string()),
             auth_mode: "api_key".to_string(),
@@ -10141,5 +10319,73 @@ auth_mode = "{auth_mode}"
             resolve_action_output_mode_for_capability(RequestedActionOutputMode::AppendOnly, true,),
             (ActionOutputMode::AppendOnly, None)
         );
+    }
+    #[test]
+    fn project_outputs_and_dynamic_inputs_use_data_without_changing_legacy_paths() {
+        let root = std::env::temp_dir().join(format!("runtime-paths-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(root.join(".cargo-ai")).unwrap();
+        fs::write(
+            root.join(".cargo-ai/project.toml"),
+            "[runtime]\ndata_root = '.cargo-ai/data'",
+        )
+        .unwrap();
+        let data = crate::commands::runtime_data::project_data_root(Some(&root))
+            .unwrap()
+            .unwrap();
+        let expected = fs::canonicalize(&root).unwrap().join(".cargo-ai/data");
+        assert_eq!(
+            super::resolve_generated_image_output_path_with_data(
+                "image.png",
+                "test",
+                None,
+                Some(&data)
+            )
+            .unwrap(),
+            expected.join("image.png")
+        );
+        assert_eq!(
+            super::resolve_generated_image_output_path("image.png", "test", None).unwrap(),
+            PathBuf::from("image.png")
+        );
+        assert_eq!(
+            super::resolve_child_usage_log_path_with_data("child.jsonl", "test", None, Some(&data))
+                .unwrap(),
+            expected.join("child.jsonl")
+        );
+        assert_eq!(
+            super::resolve_installed_child_input_path_with_data(
+                "image.png",
+                false,
+                "test",
+                1,
+                "image",
+                None,
+                Some(&data)
+            )
+            .unwrap(),
+            "image.png"
+        );
+        assert_eq!(
+            super::resolve_installed_child_input_path_with_data(
+                "image.png",
+                true,
+                "test",
+                1,
+                "image",
+                None,
+                Some(&data)
+            )
+            .unwrap(),
+            expected.join("image.png").to_string_lossy()
+        );
+        assert!(super::resolve_generated_image_output_path_with_data(
+            "../image.png",
+            "test",
+            None,
+            Some(&data)
+        )
+        .is_err());
+        assert!(!expected.exists());
+        fs::remove_dir_all(root).unwrap();
     }
 }

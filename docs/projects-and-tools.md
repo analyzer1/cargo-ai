@@ -63,6 +63,25 @@ Maximum runtime and depth cascade through the invocation tree. Inference timeout
 
 See [Packages](./packages.md) for `[build.<profile>]`, package permissions, and hosted dependency declarations.
 
+## Project-owned runtime data
+
+New projects opt in to a fixed data directory in `.cargo-ai/project.toml`:
+
+```toml
+[runtime]
+data_root = ".cargo-ai/data"
+```
+
+`cargo ai init` preserves existing behavior and does not add this setting. To adopt it in an existing project, review the tool paths and then add the setting explicitly. Other values are rejected. A project without the setting keeps its existing working-directory behavior. Initialization fails on malformed metadata before initializing Git or replacing files.
+
+In an opted-in project, Cargo AI-controlled image outputs, generated child file/image paths and image references, and action-owned child usage logs resolve under the project boundary's `.cargo-ai/data/`. Tools run with that directory as their working directory. The directory is created only when a writing action or tool invocation needs it; scaffold, inspection, and path validation do not create it. Static inputs and caller-selected input/log paths retain their existing meaning.
+
+Keep definitions, immutable assets, and tool sources outside runtime data. Build/package output retains the opt-in but excludes runtime data, including data nested inside copied assets or source tools. Explicit declarations and output destinations that overlap the reserved data root are rejected before output replacement. The managed Git ignore block excludes `/.cargo-ai/data/`; it does not untrack files already in your index or ignore an unrelated `data/` directory.
+
+Controlled data paths reject absolute/drive/UNC forms, parent traversal, and existing symbolic links or reparse points. This is path validation, not an OS sandbox: tools and subprocesses retain their ambient permissions. Use trusted code and keep installation, authentication, and sensitive actions explicit.
+
+New tool bridges keep sibling child artifacts at their original artifact location while the tool writes in data. Existing user-owned tool code is not automatically rewritten; review its bridge and relative paths before adopting the data setting. See the [tool-child guidance](../templates/guidance/tool-child-agents.md) for that compatibility boundary.
+
 ## Scaffold a Rust tool
 
 When agent JSON alone is not enough and Cargo is available, prefer a generated Rust tool over an ad hoc Python, Node, or shell helper:
