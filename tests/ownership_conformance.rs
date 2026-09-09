@@ -313,7 +313,7 @@ fn assert_csv(root: &Path, expected: &str, mode: &str) {
     assert_eq!(
         fs::read_to_string(root.join("findings.csv"))
             .unwrap_or_else(|error| panic!("missing CSV under {}: {error}", root.display())),
-        expected
+        expected.replace("\r\n", "\n")
     );
     assert_eq!(
         fs::read_to_string(root.join("compile-mode.txt")).unwrap(),
