@@ -661,6 +661,7 @@ mod tests {
         assert!(response["ui"]["sections"][1]["message"]
             .as_str()
             .expect("merge guidance should be present")
+            .replace('\\', "/")
             .contains(".cargo-ai/guidance/cargo-ai.md"));
 
         let _ = fs::remove_dir_all(dir);

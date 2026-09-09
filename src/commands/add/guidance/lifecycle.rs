@@ -1433,8 +1433,8 @@ mod tests {
             {
                 let output = std::process::Command::new("cmd")
                     .args(["/C", "mklink", "/J"])
-                    .arg(&path)
-                    .arg(&outside.0)
+                    .arg(path.to_string_lossy().replace('/', "\\"))
+                    .arg(outside.0.to_string_lossy().replace('/', "\\"))
                     .output()
                     .unwrap();
                 assert!(
