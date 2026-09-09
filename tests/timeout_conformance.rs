@@ -409,6 +409,105 @@ fn observe(
     eprintln!("timeout-observation {label}: success={success}, last_profile={}, provider_wait_ms={elapsed}, handoff_ms={handoff}", expected_profiles.last().unwrap());
 }
 
+fn observe_shared_runtime_budget(
+    label: &str,
+    output: &Output,
+    finished: Instant,
+    requests: Vec<Request>,
+    child_profile: &str,
+    budget_secs: u64,
+) {
+    let text = output_text(output);
+    assert!(!output.status.success(), "{label}: {text}");
+    assert!(
+        text.contains(&format!("max-runtime-in-sec {budget_secs}")),
+        "{label}: {text}"
+    );
+
+    // The shared deadline includes child startup. Separate reachability controls
+    // require the child request; cancellation may happen before it is sent.
+    assert!((1..=2).contains(&requests.len()), "{label}: {text}");
+    let expected = ["parent", child_profile];
+    let profiles = requests
+        .iter()
+        .map(|request| request.profile.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(profiles, &expected[..requests.len()], "{label}: {text}");
+
+    // Measure the whole remaining invocation, including the child handoff,
+    // rather than restarting the measured wait at the final provider request.
+    let elapsed_ms = finished.duration_since(requests[0].received).as_millis();
+    assert!(
+        elapsed_ms <= u128::from(budget_secs * 1000 + 1800),
+        "{label}: shared budget elapsed {elapsed_ms}ms: {text}"
+    );
+    eprintln!(
+        "timeout-observation {label}: success=false, profiles={profiles:?}, shared_wait_ms={elapsed_ms}"
+    );
+}
+
+#[test]
+fn json_child_reachability_and_shared_budget_are_separate() {
+    let fixture = Fixture::new("timeout-json-budget");
+    let project = fixture.root.join("project");
+    assert_success(
+        &cli(
+            &fixture,
+            &fixture.root,
+            &["new", project.to_str().unwrap(), "--vcs", "none"],
+        ),
+        "scaffold focused timeout project",
+    );
+    let mut source = definition();
+    source["actions"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|action| action["name"].as_str() == Some("json"));
+    for name in ["agent.json", "child.json"] {
+        fs::write(
+            project.join(name),
+            serde_json::to_vec_pretty(&source).unwrap(),
+        )
+        .unwrap();
+    }
+    create_profiles(&fixture, &project);
+
+    let server = DelayedProvider::new(vec![0, 0]);
+    configure(&fixture, &project, &server.url, Some(6));
+    let output = run_command(&fixture, &project, None, "15")
+        .args(["--run-var", "mode=json"])
+        .output()
+        .unwrap();
+    observe(
+        "focused/json/reachability",
+        &output,
+        Instant::now(),
+        server.finish(&output),
+        &["parent", "parent"],
+        true,
+        0,
+        2400,
+        None,
+    );
+
+    for budget_secs in [1, 4] {
+        let server = DelayedProvider::new(vec![0, 6400]);
+        configure(&fixture, &project, &server.url, Some(6));
+        let output = run_command(&fixture, &project, None, &budget_secs.to_string())
+            .args(["--run-var", "mode=json"])
+            .output()
+            .unwrap();
+        observe_shared_runtime_budget(
+            &format!("focused/json/shared_runtime_budget/{budget_secs}"),
+            &output,
+            Instant::now(),
+            server.finish(&output),
+            "parent",
+            budget_secs,
+        );
+    }
+}
+
 #[test]
 fn timeout_precedence_and_child_paths_remain_explicit_at_process_boundaries() {
     let fixture = Fixture::new("timeout-process");
@@ -632,16 +731,13 @@ fn timeout_precedence_and_child_paths_remain_explicit_at_process_boundaries() {
             budget_cmd.args(["--run-var", &format!("mode={mode}")]);
             let output = budget_cmd.output().unwrap();
             let finished = Instant::now();
-            observe(
+            observe_shared_runtime_budget(
                 &format!("{runtime_name}/{mode}/shared_runtime_budget"),
                 &output,
                 finished,
                 server.finish(&output),
-                &["parent", if inherited { "parent" } else { "fallback" }],
-                false,
-                0,
-                4800,
-                Some("max-runtime-in-sec"),
+                if inherited { "parent" } else { "fallback" },
+                3,
             );
 
             let server = DelayedProvider::new(vec![0, 0]);
