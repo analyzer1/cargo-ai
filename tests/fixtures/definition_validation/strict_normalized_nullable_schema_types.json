@@ -1,0 +1,44 @@
+{
+  "name": "strict_normalized_nullable_schema_types",
+  "definition": {
+    "agent_definition_schema_version": "2026-09-09.r1",
+    "inputs": [
+      {
+        "type": "text",
+        "text": "Return answer as an integer."
+      }
+    ],
+    "agent_schema": {
+      "type": "object",
+      "properties": {
+        "record": {
+          "type": " OBJECT ",
+          "properties": {
+            "label": {
+              "type": [
+                " String ",
+                " NULL "
+              ]
+            },
+            "count": {
+              "type": [
+                " null ",
+                " INTEGER "
+              ]
+            }
+          }
+        },
+        "records": {
+          "type": " ARRAY ",
+          "items": {
+            "type": " boolean "
+          }
+        }
+      }
+    },
+    "actions": []
+  },
+  "expected": {
+    "accepted": true
+  }
+}

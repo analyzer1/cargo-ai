@@ -1,0 +1,30 @@
+{
+  "name": "invalid_duplicate_enum_values",
+  "definition": {
+    "agent_definition_schema_version": "2026-09-09.r1",
+    "inputs": [
+      {
+        "type": "text",
+        "text": "Return answer as an integer."
+      }
+    ],
+    "agent_schema": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": "string",
+          "enum": [
+            "same",
+            "same"
+          ]
+        }
+      }
+    },
+    "actions": []
+  },
+  "expected": {
+    "accepted": false,
+    "code": "invalid_value",
+    "path": "$.agent_schema.properties.label.enum[1]"
+  }
+}

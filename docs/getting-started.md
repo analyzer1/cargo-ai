@@ -38,7 +38,7 @@ Create a file named `agent.json` with this complete definition:
 
 ```json
 {
-  "agent_definition_schema_version": "2026-03-03.r1",
+  "agent_definition_schema_version": "2026-09-09.r1",
   "inputs": [
     {
       "type": "text",
@@ -79,6 +79,8 @@ Create a file named `agent.json` with this complete definition:
 
 `agent_definition_schema_version` identifies the Cargo AI definition contract. Copy this value from a current Cargo AI template or guidance bundle; do not invent it from the product, project, or package version.
 
+`2026-09-09.r1` is the current strict revision. It rejects unknown definition fields and unsupported schema keywords. Valid earlier revisions retain their legacy parsing behavior; other revisions at or after this cutoff are unsupported. See [Author Agent Definitions](./agent-definitions.md) before migrating an existing definition.
+
 ## 4. Run the JSON Directly
 
 ```bash
@@ -108,6 +110,10 @@ The executable uses your configured default profile unless you pass runtime prov
 
 ## Author With an AI Coding Assistant
 
+Start with the official [Cargo AI website](https://cargo-ai.org) and follow its repository/documentation links. An assistant should read those instructions rather than infer a repository address or assume prior Cargo AI knowledge. The website links to [cargo-ai/cargo-ai](https://github.com/cargo-ai/cargo-ai). Verified: 2026-09-09.
+
+Before changing anything, inspect the current directory, existing assistant instructions, operating system, and installed `cargo`, `rustc`, `git`, and `cargo ai --help`/`--version`. Use the installed command help and version-matched guidance for supported behavior. If a command below is unavailable in the installed release, explain the mismatch and propose an explicit upgrade; do not borrow an unreleased schema or silently reinstall tools. [Platform installation instructions](./install/README.md) cover the required toolchain.
+
 For a larger project, bootstrap a project boundary and install the version-matched offline guidance bundle:
 
 ```bash
@@ -116,9 +122,19 @@ cd my-agent-project
 cargo ai add guidance --style codex
 ```
 
-Use `--style claude` for Claude Code, or repeat `--style` to install both discovery entrypoints. Cargo AI preserves divergent user-owned root instruction files and fails closed when an existing managed bundle conflicts; it does not silently overwrite them.
+For an existing directory, review its files first and use `cargo ai init` there instead of `new`. Keep its files and assistant instructions; resolve reported conflicts with the owner. Use `--vcs none` when Git initialization is not wanted.
 
-Tell the assistant what the agent should do, its inputs and outputs, and whether it needs files, commands, email, tools, or child agents. Review the resulting JSON, then repeat `hatch --check` until validation passes.
+Use `--style claude` for Claude Code, or repeat `--style` to install both discovery entrypoints. Cargo AI preserves existing user-owned root instruction files and supplies a loader snippet for review. A manifest records ownership of generated files. Check that bundle without changing it:
+
+```bash
+cargo ai guidance status
+```
+
+After an explicitly approved Cargo AI binary upgrade, `cargo ai guidance update` updates unchanged managed files from the installed binary, offline. It preserves user instructions and blocks modified, incomplete, malformed or legacy unmanaged bundles. See [guidance maintenance](./projects-and-tools.md#maintain-assistant-guidance) for recovery and Git behavior.
+
+Keep installation, sign-in, profile/credential access, permission grants and first-run side effects explicit. Select a supported provider/profile with the user; the authoring assistant and model provider are separate choices. Never put credentials in project source, guidance or packages. This workflow does not require a plugin or a desktop authoring application.
+
+Tell the assistant what the agent should do, its inputs and outputs, and whether it needs files, commands, email, tools, or child agents. Review the resulting JSON, validate it with `hatch --check`, then approve and observe a first run with the selected profile. Record what ran, expected versus observed output, assistance or failures, and any remaining setup or unsupported capability. A structural check alone does not prove a successful model run. Success in one tested environment is not a universal one-prompt setup guarantee.
 
 ## Next
 

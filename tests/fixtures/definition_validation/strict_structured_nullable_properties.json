@@ -1,0 +1,76 @@
+{
+  "name": "strict_structured_nullable_properties",
+  "definition": {
+    "agent_definition_schema_version": "2026-09-09.r1",
+    "inputs": [
+      {
+        "type": "text",
+        "text": "Return answer as an integer."
+      }
+    ],
+    "agent_schema": {
+      "type": "object",
+      "properties": {
+        "answer": {
+          "type": "integer"
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "score": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "details": {
+          "type": "object",
+          "properties": {
+            "note": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "actions": [
+      {
+        "name": "print_answer",
+        "logic": {
+          "==": [
+            {
+              "var": "answer"
+            },
+            4
+          ]
+        },
+        "run": [
+          {
+            "kind": "exec",
+            "program": "echo",
+            "args": [
+              {
+                "var": "answer"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "accepted": true
+  }
+}

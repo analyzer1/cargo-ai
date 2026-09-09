@@ -12,6 +12,9 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+#[path = "definition_validation.rs"]
+pub mod definition_validation;
+
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
@@ -31,6 +34,7 @@ const SUPPORTED_GENERATED_IMAGE_EXTENSIONS_MESSAGE: &str = "`.png`, `.jpg`, `.jp
 
 #[derive(Debug)]
 pub enum BuildError {
+    Definition(definition_validation::DefinitionValidationError),
     Config {
         path: String,
         message: String,
@@ -66,6 +70,7 @@ impl BuildError {
 impl fmt::Display for BuildError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Definition(error) => write!(f, "{error}"),
             Self::Config { path, message } => {
                 write!(f, "Invalid `.agentcfg` at `{path}`: {message}")
             }
@@ -84,6 +89,7 @@ impl fmt::Display for BuildError {
 impl Error for BuildError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::Definition(error) => Some(error),
             Self::Config { .. } => None,
             Self::Message(_) => None,
             Self::Io { source, .. } => Some(source),
@@ -261,6 +267,7 @@ struct AgentConfig {
     properties: Vec<AgentProperty>,
     action_execution: ActionExecutionMode,
     actions: Vec<Action>,
+    strict_definition: bool,
 }
 
 // Shared build module: these symbols are used by cargo-ai's root build script,
@@ -403,8 +410,8 @@ fn resolve_out_dir() -> Result<PathBuf, BuildError> {
 }
 
 fn parse_and_validate_agent_config(json_str: &str) -> Result<(Value, AgentConfig), BuildError> {
-    let root: Value = serde_json::from_str(json_str)
-        .map_err(|err| BuildError::config("$", format!("invalid JSON syntax: {err}")))?;
+    let (root, _) =
+        definition_validation::parse_definition(json_str).map_err(BuildError::Definition)?;
     let parsed = parse_agent_config(&root)?;
     Ok((root, parsed))
 }
@@ -509,6 +516,9 @@ fn parse_agent_config(root: &Value) -> Result<AgentConfig, BuildError> {
         properties: parsed_properties,
         action_execution,
         actions,
+        strict_definition: definition_validation::definition_revision(root)
+            .map_err(BuildError::Definition)?
+            == definition_validation::DefinitionRevision::Strict,
     })
 }
 
@@ -4412,16 +4422,30 @@ fn render_agent_model(config: &AgentConfig) -> String {
         ActionExecutionMode::Parallel => "ActionExecutionMode::Parallel",
     };
 
+    let raw_validation_complete = config.strict_definition;
+    let raw_validation = if config.strict_definition {
+        "        crate::definition_validation::validate_model_output(value, &json_schema_value()).map_err(|error| error.to_string())"
+    } else {
+        "        Ok(())"
+    };
+
     format!(
         r##"
 use schemars::{{JsonSchema, schema_for}};
 use serde_json;
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Output {{
 {struct_fields}}}
 
 impl crate::providers::ValidatedResponse for Output {{
+    const RAW_VALIDATION_COMPLETE: bool = {raw_validation_complete};
+
+    fn validate_raw_response(value: &serde_json::Value) -> Result<(), String> {{
+{raw_validation}
+    }}
+
     fn validate_response(&self) -> Result<(), String> {{
 {validation_calls}        Ok(())
     }}

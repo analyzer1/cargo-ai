@@ -163,6 +163,23 @@ Project bootstrap may add `.gitignore` entries for managed build state when vers
 
 The generated guidance bundle is the exhaustive offline assistant contract. This human guide summarizes the workflow without replacing that bundle.
 
+## Maintain assistant guidance
+
+```bash
+cargo ai guidance status
+cargo ai guidance update
+```
+
+Status is read-only, including startup: it does not initialize Cargo AI Home, migrate credentials, check the network, acquire a new lock, recover an interrupted update or repair ignores. It reports missing, current, update available, locally modified, incomplete, malformed, or legacy/unmanaged guidance. Separate notices explain preserved instructions, missing ignore entries and tracked generated files.
+
+An explicit update uses only the installed binary's bundle. Its manifest records format, producing version, bundle digest and managed file hashes. Only unchanged previously owned files may be replaced or retired; newly added bundle files are checked for conflicts first. Existing user-owned or modified `AGENTS.md` and `CLAUDE.md` remain byte-for-byte intact, with a loader snippet for the owner to review. Fresh add creates the same ownership manifest used by update. Identical legacy files without a manifest do not establish ownership.
+
+Updates serialize writers, preflight the complete set, and stage a recoverable replacement including any new root loader and ignore-file repair. Failure before commit restores the prior set or leaves an explicitly incomplete transaction for verified recovery on a later update. After commit, recovery retains the verified new set and finishes cleanup. Status never performs recovery. A directory swap can briefly make guidance unavailable to concurrent readers; it does not promise uninterrupted reads. If recovery data or owned files changed unexpectedly, stop and reconcile them rather than deleting recovery state or inventing a manifest. Keep a copy of local edits before resolving a blocked bundle.
+
+Add/update repairs only Cargo AI's marked ignore block, and only when valid project metadata selects Git and Git confirms that exact project boundary. It preserves unrelated entries and never changes the Git index. `vcs = "none"`, missing/malformed metadata, and an unrelated ancestor repository cause no automatic ignore mutation. Linked/reparse paths are rejected.
+
+Build/package recursion and tool-source packaging exclude incidental `.cargo-ai/guidance/` bundles and manifest-owned root loaders. User-owned instruction files remain ordinary source. Deliberately listing a guidance path as an asset includes it; guidance locks and transaction/recovery state are always excluded. This does not relax runtime-data exclusion.
+
 ## Tools that call child agents
 
 New tool scaffolds include a Cargo AI-owned child-agent helper in `src/agent_bridge.rs`. Use it through the `InvocationContext` passed to `src/tool.rs` instead of hand-building subprocess flags, depth propagation, runtime-budget forwarding, or usage-ledger metadata.

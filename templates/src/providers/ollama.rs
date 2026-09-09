@@ -208,6 +208,7 @@ mod tests {
             .await
             .expect("image request should decode");
 
-        assert_eq!(image, expected_bytes);
+        assert_eq!(image.bytes, expected_bytes);
+        assert_eq!(image.usage, None);
     }
 }

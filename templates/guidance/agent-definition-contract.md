@@ -3,11 +3,11 @@
 Use this file as the complete offline contract when you need to author or review a Cargo AI agent definition without looking at repository code.
 That JSON definition is the source for a generated CLI executable: it defines the inputs, structured output, and follow-up actions the hatched tool will use.
 
-Unless a section says otherwise, the supported field lists below are exhaustive for the current MVP contract.
+The current strict contract is `2026-09-09.r1`. Unless a section says otherwise, the supported field lists below are exhaustive for that revision. Stable objects reject additional fields; user-named maps allow names whose values satisfy the stated contract.
 
 ## Required Top-Level Shape
 
-Every agent definition must be a JSON object with these keys in this order:
+Every agent definition must be a JSON object with these keys. Prefer this order for readability; JSON key order does not change validation:
 
 1. `agent_definition_schema_version`
 2. optional `inputs`
@@ -21,10 +21,13 @@ Every agent definition must be a JSON object with these keys in this order:
 - Required.
 - Non-empty string.
 - Format: `YYYY-MM-DD.rN`
-- Example: `2026-03-03.r1`
+- Current strict revision: `2026-09-09.r1`.
 - This identifies the Cargo AI contract used to interpret this definition. It is not the agent or package version; package version is `[project].version`.
 - Copy the schema version from the current Cargo AI template or guidance. Do not invent one from the current date, an agent/package/project version, or the Cargo AI product version.
 - The legacy top-level `version` key is invalid. Rename that key without changing its schema-version value.
+- Syntactically valid revisions chronologically before `2026-09-09.r1` keep their legacy parsing behavior, including permissive unknown fields. This includes `2026-03-03.r1`, `2026-03-11.r1`, and `2026-03-28.r1`; it is not a closed registry of old revisions.
+- Exactly `2026-09-09.r1` selects strict validation. Every other revision at or after that cutoff is unsupported. Date and revision components are compared numerically.
+- Existing definitions are not rewritten automatically. To migrate, review the complete definition against this contract and validate it with the strict revision. Do not replace an unsupported version header blindly; check the intended contract or upgrade Cargo AI.
 
 ## `inputs`
 
@@ -147,6 +150,7 @@ Example:
   - `type: "object"`
   - `properties: { ... }`
 - Each property must define a `type`.
+- Top-level property names must also be valid generated Rust identifiers; prefer names such as `summary` or `needs_review` and avoid reserved words.
 - Top-level property names are reserved for action-variable lookup. Step-captured variable names cannot reuse them.
 - `properties` may be empty. That declares the structural action-only shape.
 
@@ -155,13 +159,28 @@ Supported top-level property `type` values:
 - `number`
 - `integer`
 - `boolean`
- - `array`
- - `object`
+- `array`
+- `object`
 
 Supported optional top-level property metadata and constraints:
 - `description` on any supported field
 - `enum` on `string` fields only
 - `minimum`, `maximum`, `exclusiveMinimum`, and `exclusiveMaximum` on `number` and `integer` fields
+
+Exact descriptor keys are:
+
+| Descriptor | Allowed keys |
+|---|---|
+| Root `agent_schema` | `type`, `properties` |
+| String | `type`, optional `description`, optional `enum` |
+| Number or integer | `type`, optional `description`, optional `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum` |
+| Boolean | `type`, optional `description` |
+| Array | `type`, optional `description`, required `items` |
+| Object | `type`, optional `description`, required `properties` |
+
+The same descriptor rules apply to array items and structured object properties, subject to the nesting and nullable restrictions below. `properties` allows user-chosen names; its values are schema descriptors.
+
+Every declared output property is required. Cargo AI generates provider-facing `required` and `additionalProperties: false` metadata itself. Do not put either keyword in an authored definition. Strict definitions also reject the type alias `num`, `$ref`, `$schema`, `format`, composition keywords such as `oneOf`/`anyOf`/`allOf`, and every other unsupported schema keyword. No JSON Schema format-assertion vocabulary or remote schema-reference loading is supported.
 
 Constraint rules:
 - `enum` values must be non-empty strings
@@ -196,7 +215,7 @@ Structural action-only rule:
 ## `actions`
 
 - Required.
-- Array with at least one action.
+- Array; `actions: []` is valid for a model-only definition that needs no follow-up actions.
 - Optional top-level `action_execution` may appear alongside `actions`.
   - Allowed values: `sequential`, `parallel`
   - Omitted means `sequential`
@@ -208,10 +227,17 @@ Structural action-only rule:
   - `name`
   - `logic`
   - `run`
+- Each action's `run` array must contain at least one step.
 
 `logic` uses JSON Logic against the top-level action data object. At action start, that means:
 - top-level model output fields plus declared `runtime.*` values for schema-backed agents
 - declared `runtime.*` values only for the structural action-only shape
+
+Each `logic` or `when` expression object has exactly one supported operator:
+
+`==`, `===`, `!=`, `!==`, `var`, `!`, `!!`, `if`, `or`, `and`, `<`, `<=`, `>`, `>=`, `missing`, `missing_some`, `min`, `max`, `+`, `-`, `*`, `/`, `%`, `in`, `cat`, `substr`, `log`, `merge`, `map`, `filter`, `reduce`, `all`, `some`, `none`.
+
+Existing flat-variable, scalar-reference and comparison-type rules still apply; the operator list does not add scoped-variable lookup. The `literal` operator is unsupported in the strict revision. For a constant true gate, use `{ "==": [1, 1] }`. Strings, numbers, booleans and arrays used as expression data remain bounded data.
 
 If `logic` evaluates true, the action's `run` steps execute in order.
 - In `sequential`, matching top-level actions run one after another.
@@ -246,10 +272,16 @@ Required fields:
 
 Required fields:
 - `kind`
-- `agent`
+- exactly one of `artifact` or the legacy alias `agent`
 
 Optional fields:
 - `profile`
+- `usage_log`
+- `inputs`
+- `input_mode`
+- `input_overrides`
+- `run_vars`
+- `ignore_tools`
 
 ### `tool`
 
@@ -263,14 +295,16 @@ Optional fields:
 
 Use `kind: "tool"` for Cargo AI-managed project-local tools created with `cargo ai add tool <name>`.
 
-`params` is an object whose values may be JSON literals or variable references such as `{ "var": "runtime.symbol" }`. Tool params may declare `string`, `boolean`, `integer`, `number`, `array`, or `object`. Cargo AI validates literal params during check/build and validates resolved variable params at runtime against the tool's `describe.params` contract.
+`params` is an object whose values may be JSON literals or variable references such as `{ "var": "runtime.symbol" }`. A tool's `describe.params` contract may declare `string`, `boolean`, `integer`, `number`, `array`, or `object`. Cargo AI validates literal params during check/build and validates resolved variable params at runtime against that contract.
+
+Tool parameter names are an open map, subject to the tool's own declared contract. An object with exactly one `var` key is a reference. Other objects and arrays are literal JSON data, including their nested keys; they are bounded but are not interpreted as definition fields or policy. A standalone null parameter is unsupported; null may appear inside a literal array or object, subject to the tool's own application checks.
 
 For structured tool params in this slice:
 - Cargo AI validates only top-level kind compatibility (`array` vs `object`)
 - deeper item/object shape validation remains the tool's responsibility
 - structured values are passed to tools as raw JSON with no string coercion
 
-`output_variable` is optional. The tool's `describe.result` schema must be a nullable string, but if `output_variable` is set, the actual `invoke` response must contain a non-null string result.
+`output_variable` is optional. The tool's `describe.result` schema must be a nullable string. An `invoke` response must contain exactly `protocol_version` and `result`; an omitted `result` is invalid. `result` is a string or null, and must be a non-null string when `output_variable` is set. Keep structured application results inside a serialized string if the tool needs to return them; this contract does not add arbitrary result schemas.
 
 ### `email_me`
 
@@ -313,7 +347,7 @@ Required fields:
 - For Ollama's experimental OpenAI-compatible `/v1/images/generations` endpoint, use an Ollama image model on an Ollama profile. The current compatibility slice uses Ollama's documented `b64_json` response path, so Ollama-backed `generate_image` steps currently require a `.png` output path and do not support `reference_images`.
 - Current-at-ship-date note: official OpenAI docs list `gpt-image-2` for image generation and editing, including high-fidelity image inputs. Verified: 2026-05-22.
 
-Named reference image example:
+Named reference image definition fragment:
 
 ```json
 {
@@ -367,6 +401,8 @@ These fields are available on every step kind:
 `exec` and `tool` also support:
 - `output_variable`
 
+Only the common controls and the fields listed for a step's own kind are allowed. For example, `output_variable` is invalid on `agent`, and `program` is invalid on `tool`. String-part references have exactly one key, `var`; neighboring keys are rejected rather than ignored.
+
 ### `platform`
 
 - Optional.
@@ -393,7 +429,7 @@ Example:
 ## Returned Output vs Actions
 
 - The top-level `agent_schema` fields are the agent's returned structured output.
-- Actions run after the model has produced that top-level output.
+- Actions run only after the model's raw structured output passes the declared shape, type, enum, numeric-bound and resource checks. Missing properties and unknown properties, including unknown root fields, fail before actions.
 - `exec`, `agent`, `tool`, `email_me`, and `generate_image` steps are follow-up side effects or orchestration.
 - Action steps do not mutate the returned top-level output object.
 - `output_variable`, `status_variable`, and `error_variable` are action-local only.
@@ -479,10 +515,56 @@ For `kind: "agent"`:
 
 ## Validation Expectations
 
+Validation checks structure and declared contracts. It does not prove that a model's claims are true, that an instruction is trustworthy, or that a tool's deeper application data is correct. Model or tool output cannot add permissions or new action steps; executable work remains governed by the authored definition and applicable runtime permission checks. Raw `exec` output remains text.
+
+### Stable object and reference shapes
+
+Besides the descriptor and step tables above, these objects have exhaustive keys:
+
+| Object | Allowed keys |
+|---|---|
+| Root | `agent_definition_schema_version`, `agent_schema`, `actions`, optional `inputs`, `runtime_vars`, `action_execution` |
+| Top-level input | `type`, optional `name`, and optional matching `text`, `url` or `path` |
+| Runtime-variable descriptor | `type`, optional `default` |
+| Action | `name`, `logic`, `run` |
+| Child input | exactly `input`, or `type` plus the matching required `text`, `url` or `path` |
+| Child input override reference | exactly `var` or exactly `input`; a plain string is also valid |
+| Child runtime-variable reference | exactly `var`; a string, number or boolean literal is also valid |
+| Image reference | exactly `input` or exactly `path` |
+
+The open-name maps are schema `properties`, `runtime_vars`, tool `params`, child `run_vars`, and child `input_overrides`. Their names and values must still satisfy the applicable identifier, reference and tool rules. Additional stable keys require a supported future contract; there is no extension container.
+
+### Resource limits
+
+Strict definitions and their structured model output receive bounded validation before actions:
+
+| Resource | Maximum |
+|---|---:|
+| Aggregate decoded UTF-8 key/string bytes | 1 MiB |
+| Individual string / key | 256 KiB / 256 bytes |
+| JSON value nodes / depth, with root at zero | 65,536 / 32 |
+| Members in one object / entries in one array | 4,096 / 4,096 |
+| Inputs, runtime variables, schema properties per object | 256 each |
+| Actions / steps per action / total steps | 256 / 256 / 4,096 |
+| Tool params, child inputs/overrides/run vars, image references | 256 each |
+| Enum entries / string parts | 1,024 each |
+| Validation work, charged node/constraint visits | 262,144 |
+
+Decoded-byte limits count keys and string values, not formatting whitespace. Work includes repeated node and constraint checks. These bounds apply to parsed strict data and its validation; they do not bound transport reads, JSON parsing allocations, or legacy validation. These are resource ceilings, not performance promises. Split an oversized workflow or reduce repeated/literal data instead of changing the version to bypass validation.
+
+### Reading errors
+
+Definition errors carry a stable `code`, a `$`-rooted JSON `path`, a `message`, sorted `expected_keys`, and a `corrective_action`. Keys that cannot use dotted notation have bracket-quoted paths, such as `$.agent_schema.properties["review.note"]`. Resource errors also report `limit`, `maximum`, and `observed`. Transport context may add a prefix without changing the semantic code or path.
+
+Codes are `invalid_json`, `missing_required_field`, `invalid_type`, `invalid_value`, `unknown_field`, `unsupported_schema_version`, `legacy_schema_key`, `unsupported_schema_keyword`, `unsupported_operator`, `invalid_reference`, `duplicate_name`, and `limit_exceeded`. Correct the reported path and rerun validation; do not remove a required constraint just to silence an error.
+
 Expect `cargo ai hatch <agent-name> --config <config.json> --check` to reject at least these cases:
 - missing required top-level keys
 - legacy `version`
 - malformed `agent_definition_schema_version`
+- unsupported versions at or after the strict cutoff
+- unknown stable-object keys, unsupported schema keywords or logic operators
+- exceeded resource limits
 - unsupported `agent_schema` property types
 - nested arrays, deeper nested objects, or unsupported union types in `agent_schema`
 - invalid `description`, `enum`, or numeric-bound metadata on a property
@@ -506,6 +588,8 @@ Expect `cargo ai hatch <agent-name> --config <config.json> --check` to reject at
 - malformed `failure_mode`
 
 ## Minimal Valid Examples
+
+These are schema and step fragments to use inside a complete definition.
 
 ```json
 {

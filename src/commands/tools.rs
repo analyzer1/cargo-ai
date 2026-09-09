@@ -151,9 +151,10 @@ pub(crate) struct ToolDescribeDocument {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ToolInvokeResponse {
     protocol_version: u32,
-    result: Option<String>,
+    result: serde_json::Value,
 }
 
 #[derive(Clone, Debug)]
@@ -1763,7 +1764,22 @@ pub(crate) fn validate_tool_invoke_response(
             resolved.tool_id, response.protocol_version
         ));
     }
-    Ok(response.result)
+    crate::definition_validation::validate_data_limits(&response.result, "$.result").map_err(
+        |error| {
+            format!(
+                "Tool '{}' returned invalid invoke JSON: {error}",
+                resolved.tool_id
+            )
+        },
+    )?;
+    match response.result {
+        serde_json::Value::Null => Ok(None),
+        serde_json::Value::String(result) => Ok(Some(result)),
+        _ => Err(format!(
+            "Tool '{}' returned invalid invoke JSON: `result` must be a string or null.",
+            resolved.tool_id
+        )),
+    }
 }
 
 fn json_value_matches_declared_type(value: &Value, expected: &str) -> bool {
@@ -1982,6 +1998,62 @@ fn step_matches_platform(platforms: Option<&[String]>, current_platform: Option<
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn tool_response_requires_an_explicit_nullable_string_and_closed_envelope() {
+        let resolved = super::ResolvedTool {
+            tool_id: "fixture".to_string(),
+            scope: super::ToolScope::Project,
+            manifest_path: PathBuf::from("tool.json"),
+            binary_name: "fixture".to_string(),
+            target_triple: "fixture-target".to_string(),
+            binary_path: PathBuf::from("fixture"),
+        };
+        for (body, expected) in [
+            (r#"{"protocol_version":1,"result":null}"#, None),
+            (
+                r#"{"protocol_version":1,"result":"literal tool output"}"#,
+                Some("literal tool output".to_string()),
+            ),
+        ] {
+            assert_eq!(
+                super::validate_tool_invoke_response(&resolved, body.as_bytes()).unwrap(),
+                expected
+            );
+        }
+        for body in [
+            r#"{"protocol_version":1}"#,
+            r#"{"result":null}"#,
+            r#"{"protocol_version":2,"result":null}"#,
+            r#"{"protocol_version":1,"result":false}"#,
+            r#"{"protocol_version":1,"result":{"permissions":"all"}}"#,
+            r#"{"protocol_version":1,"result":[],"credential":"choose-another"}"#,
+            r#"{"protocol_version":1,"result":null,"permissions":"all"}"#,
+            r#"{"protocol_version":1,"result":null,"result":"duplicate"}"#,
+            "not-json",
+        ] {
+            assert!(
+                super::validate_tool_invoke_response(&resolved, body.as_bytes()).is_err(),
+                "accepted malformed envelope: {body}"
+            );
+        }
+        let at_limit = serde_json::json!({
+            "protocol_version": 1,
+            "result": "x".repeat(crate::definition_validation::MAX_STRING_BYTES),
+        });
+        assert!(
+            super::validate_tool_invoke_response(&resolved, at_limit.to_string().as_bytes())
+                .is_ok()
+        );
+        let over_limit = serde_json::json!({
+            "protocol_version": 1,
+            "result": "x".repeat(crate::definition_validation::MAX_STRING_BYTES + 1),
+        });
+        let error =
+            super::validate_tool_invoke_response(&resolved, over_limit.to_string().as_bytes())
+                .unwrap_err();
+        assert!(error.contains("string_bytes"));
+    }
     use super::{
         lint_project_source_tool, materialize_source_tool_for_package_runtime,
         maybe_find_project_root, render_binary_tool_manifest_json,

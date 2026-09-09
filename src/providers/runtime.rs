@@ -23,6 +23,13 @@ pub(crate) struct ImageReference {
 }
 
 pub(crate) trait ValidatedResponse {
+    // A complete raw check avoids evaluating the same schema again after parsing.
+    const RAW_VALIDATION_COMPLETE: bool = false;
+
+    fn validate_raw_response(_value: &serde_json::Value) -> Result<(), String> {
+        Ok(())
+    }
+
     fn validate_response(&self) -> Result<(), String>;
 }
 
@@ -103,8 +110,16 @@ impl<T: for<'de> Deserialize<'de> + Serialize + Clone + ValidatedResponse> Cargo
 
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn set_response(&mut self, response: String) -> bool {
-        match serde_json::from_str::<T>(&response) {
-            Ok(response) => match response.validate_response() {
+        let parsed = serde_json::from_str::<serde_json::Value>(&response)
+            .ok()
+            .filter(|value| T::validate_raw_response(value).is_ok())
+            .and_then(|value| serde_json::from_value::<T>(value).ok());
+        match parsed {
+            Some(response) => match if T::RAW_VALIDATION_COMPLETE {
+                Ok(())
+            } else {
+                response.validate_response()
+            } {
                 Ok(()) => {
                     self.response = Some(response);
                     true
@@ -114,7 +129,7 @@ impl<T: for<'de> Deserialize<'de> + Serialize + Clone + ValidatedResponse> Cargo
                     false
                 }
             },
-            Err(_) => {
+            None => {
                 // Keep state deterministic: failed parse must not retain stale success output.
                 self.response = None;
                 false
@@ -380,6 +395,30 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+    struct RawValidatedOutput {
+        answer: i32,
+    }
+
+    impl ValidatedResponse for RawValidatedOutput {
+        const RAW_VALIDATION_COMPLETE: bool = true;
+
+        fn validate_raw_response(value: &serde_json::Value) -> Result<(), String> {
+            crate::definition_validation::validate_model_output(
+                value,
+                &serde_json::json!({
+                    "type": "object",
+                    "properties": { "answer": { "type": "integer", "minimum": 1 } }
+                }),
+            )
+            .map_err(|error| error.to_string())
+        }
+
+        fn validate_response(&self) -> Result<(), String> {
+            panic!("a complete raw check must not repeat typed validation")
+        }
+    }
+
     #[test]
     fn content_parts_prefix_context_and_preserve_input_order() {
         let cargo = Cargo::<SampleOutput>::new(
@@ -425,6 +464,22 @@ mod tests {
 
         assert!(!cargo.set_response(r#"{"answer":4}"#.to_string()));
         assert_eq!(cargo.get_response(), None);
+    }
+
+    #[test]
+    fn raw_validation_rejects_fields_before_deserialization_and_clears_success() {
+        let mut cargo = Cargo::<RawValidatedOutput>::new(vec![], String::new());
+        for invalid in [
+            r#"{"answer":4,"permission":"run more commands"}"#,
+            r#"{"answer":0}"#,
+            r#"{"answer":"4"}"#,
+            r#"{}"#,
+        ] {
+            assert!(cargo.set_response(r#"{"answer":4}"#.to_string()));
+            assert_eq!(cargo.get_response(), Some(RawValidatedOutput { answer: 4 }));
+            assert!(!cargo.set_response(invalid.to_string()), "{invalid}");
+            assert_eq!(cargo.get_response(), None);
+        }
     }
 
     #[test]

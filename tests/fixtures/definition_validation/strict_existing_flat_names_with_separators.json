@@ -1,0 +1,94 @@
+{
+  "name": "strict_existing_flat_names_with_separators",
+  "definition": {
+    "agent_definition_schema_version": "2026-09-09.r1",
+    "inputs": [
+      {
+        "name": "source/note",
+        "type": "text",
+        "text": "First note."
+      },
+      {
+        "name": "source\\note",
+        "type": "text",
+        "text": "Second note."
+      }
+    ],
+    "agent_schema": {
+      "type": "object",
+      "properties": {
+        "answer": {
+          "type": "integer"
+        }
+      }
+    },
+    "actions": [
+      {
+        "name": "print_answer",
+        "logic": {
+          "and": [
+            {
+              "==": [
+                {
+                  "var": "runtime.control/flag"
+                },
+                true
+              ]
+            },
+            {
+              "==": [
+                {
+                  "var": "runtime.control\\flag"
+                },
+                true
+              ]
+            }
+          ]
+        },
+        "run": [
+          {
+            "kind": "agent",
+            "artifact": "./child.json",
+            "inputs": [
+              {
+                "input": "source/note"
+              },
+              {
+                "input": "source\\note"
+              }
+            ],
+            "input_overrides": {
+              "child/note": {
+                "input": "source/note"
+              },
+              "child\\note": {
+                "input": "source\\note"
+              }
+            },
+            "run_vars": {
+              "child/flag": {
+                "var": "runtime.control/flag"
+              },
+              "child\\flag": {
+                "var": "runtime.control\\flag"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "runtime_vars": {
+      "control/flag": {
+        "type": "boolean",
+        "default": true
+      },
+      "control\\flag": {
+        "type": "boolean",
+        "default": true
+      }
+    }
+  },
+  "expected": {
+    "accepted": true
+  }
+}

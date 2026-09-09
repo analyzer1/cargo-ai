@@ -1,0 +1,56 @@
+{
+  "name": "strict_parallel_platform_controls",
+  "definition": {
+    "agent_definition_schema_version": "2026-09-09.r1",
+    "inputs": [
+      {
+        "type": "text",
+        "text": "Return answer as an integer."
+      }
+    ],
+    "agent_schema": {
+      "type": "object",
+      "properties": {
+        "answer": {
+          "type": "integer"
+        }
+      }
+    },
+    "actions": [
+      {
+        "name": "print_answer",
+        "logic": {
+          "==": [
+            {
+              "var": "answer"
+            },
+            4
+          ]
+        },
+        "run": [
+          {
+            "kind": "exec",
+            "program": "echo",
+            "args": [
+              {
+                "var": "answer"
+              }
+            ],
+            "platform": [
+              "macos",
+              "linux",
+              "windows"
+            ],
+            "failure_mode": "continue",
+            "status_variable": "print_status",
+            "error_variable": "print_error"
+          }
+        ]
+      }
+    ],
+    "action_execution": "parallel"
+  },
+  "expected": {
+    "accepted": true
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "invalid_root_array",
+  "definition": [],
+  "expected": {
+    "accepted": false,
+    "code": "invalid_type",
+    "path": "$"
+  }
+}

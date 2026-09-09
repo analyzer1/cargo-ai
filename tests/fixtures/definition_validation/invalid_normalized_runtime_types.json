@@ -1,0 +1,67 @@
+{
+  "name": "invalid_normalized_runtime_types",
+  "definition": {
+    "agent_definition_schema_version": "2026-09-09.r1",
+    "inputs": [
+      {
+        "type": "text",
+        "text": "Return answer as an integer."
+      }
+    ],
+    "agent_schema": {
+      "type": "object",
+      "properties": {
+        "answer": {
+          "type": "integer"
+        }
+      }
+    },
+    "actions": [
+      {
+        "name": "print_answer",
+        "logic": {
+          "==": [
+            {
+              "var": "answer"
+            },
+            4
+          ]
+        },
+        "run": [
+          {
+            "kind": "exec",
+            "program": "echo",
+            "args": [
+              {
+                "var": "answer"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "runtime_vars": {
+      "label": {
+        "type": " STRING ",
+        "default": ""
+      },
+      "ready": {
+        "type": " Boolean ",
+        "default": false
+      },
+      "count": {
+        "type": " INTEGER ",
+        "default": 2
+      },
+      "score": {
+        "type": " Number ",
+        "default": 0.5
+      }
+    }
+  },
+  "expected": {
+    "accepted": false,
+    "code": "invalid_value",
+    "path": "$.runtime_vars.count.type"
+  }
+}

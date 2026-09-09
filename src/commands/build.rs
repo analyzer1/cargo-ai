@@ -400,6 +400,7 @@ fn validate_build_input_boundaries(
         .chain(&profile.assets)
     {
         let path = super::runtime_data::validate_declared_input(raw)?;
+        super::add::guidance::packaging::validate_declared(&path)?;
         super::runtime_data::validate_source_tree(project_root, &path, false)?;
         sources.push(path);
     }
@@ -786,6 +787,7 @@ fn copy_declared_path(
     require_json_file: bool,
 ) -> Result<(), String> {
     super::runtime_data::validate_declared_input(relative_path)?;
+    super::add::guidance::packaging::validate_declared(Path::new(relative_path))?;
     validate_project_relative_path(
         relative_path,
         if require_json_file { "Agent" } else { "Asset" },
@@ -821,7 +823,12 @@ fn copy_declared_path(
 
     let dest_path = build_root.join(relative_path);
     if source_path.is_dir() {
-        copy_directory_recursive(project_root, source_path.as_path(), dest_path.as_path())
+        copy_directory_recursive(
+            project_root,
+            source_path.as_path(),
+            dest_path.as_path(),
+            super::add::guidance::packaging::is_bundle_path(Path::new(relative_path)),
+        )
     } else {
         copy_file(project_root, source_path.as_path(), dest_path.as_path())
     }
@@ -855,7 +862,12 @@ fn copy_file(project_root: &Path, source: &Path, dest: &Path) -> Result<(), Stri
     Ok(())
 }
 
-fn copy_directory_recursive(project_root: &Path, source: &Path, dest: &Path) -> Result<(), String> {
+fn copy_directory_recursive(
+    project_root: &Path,
+    source: &Path,
+    dest: &Path,
+    declared_bundle: bool,
+) -> Result<(), String> {
     super::runtime_data::confined_path(
         project_root,
         source
@@ -894,6 +906,10 @@ fn copy_directory_recursive(project_root: &Path, source: &Path, dest: &Path) -> 
         ) {
             continue;
         }
+        if super::add::guidance::packaging::skip_entry(project_root, &source_path, declared_bundle)?
+        {
+            continue;
+        }
         super::runtime_data::confined_path(
             project_root,
             source_path
@@ -902,7 +918,12 @@ fn copy_directory_recursive(project_root: &Path, source: &Path, dest: &Path) -> 
             "Build entry",
         )?;
         if source_path.is_dir() {
-            copy_directory_recursive(project_root, source_path.as_path(), dest_path.as_path())?;
+            copy_directory_recursive(
+                project_root,
+                source_path.as_path(),
+                dest_path.as_path(),
+                declared_bundle,
+            )?;
         } else {
             copy_file(project_root, source_path.as_path(), dest_path.as_path())?;
         }

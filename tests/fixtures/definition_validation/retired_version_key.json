@@ -1,0 +1,49 @@
+{
+  "name": "retired_version_key",
+  "definition": {
+    "inputs": [
+      {
+        "type": "text",
+        "text": "Return answer as an integer."
+      }
+    ],
+    "agent_schema": {
+      "type": "object",
+      "properties": {
+        "answer": {
+          "type": "integer"
+        }
+      }
+    },
+    "actions": [
+      {
+        "name": "print_answer",
+        "logic": {
+          "==": [
+            {
+              "var": "answer"
+            },
+            4
+          ]
+        },
+        "run": [
+          {
+            "kind": "exec",
+            "program": "echo",
+            "args": [
+              {
+                "var": "answer"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "version": "2026-09-09.r1"
+  },
+  "expected": {
+    "accepted": false,
+    "code": "legacy_schema_key",
+    "path": "$.version"
+  }
+}

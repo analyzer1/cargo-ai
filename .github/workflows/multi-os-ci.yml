@@ -52,7 +52,7 @@ jobs:
   deterministic:
     name: Deterministic qualification (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 60
     strategy:
       fail-fast: ${{ ! inputs.collect_all }}
       matrix:
@@ -91,10 +91,10 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Check all targets
-        run: cargo check --all-targets
+        run: cargo check --locked --all-targets
 
       - name: Run deterministic test suite
-        run: cargo test --all-targets
+        run: cargo test --locked --all-targets
 
       - name: Run generated provider parity
         shell: bash
@@ -108,7 +108,7 @@ jobs:
             generated_openai_smoke_isolated_and_deterministic \
             generated_ollama_smoke_isolated_and_deterministic
           do
-            cargo test --test provider_smoke "$test_name" -- --ignored --exact
+            cargo test --locked --test provider_smoke "$test_name" -- --ignored --exact
           done
 
       - name: Build candidate CLI

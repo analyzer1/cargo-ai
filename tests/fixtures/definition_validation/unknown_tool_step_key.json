@@ -1,0 +1,45 @@
+{
+  "name": "unknown_tool_step_key",
+  "definition": {
+    "agent_definition_schema_version": "2026-09-09.r1",
+    "inputs": [
+      {
+        "type": "text",
+        "text": "Return answer as an integer."
+      }
+    ],
+    "agent_schema": {
+      "type": "object",
+      "properties": {
+        "answer": {
+          "type": "integer"
+        }
+      }
+    },
+    "actions": [
+      {
+        "name": "print_answer",
+        "logic": {
+          "==": [
+            {
+              "var": "answer"
+            },
+            4
+          ]
+        },
+        "run": [
+          {
+            "kind": "tool",
+            "name": "record_result",
+            "program": "extra"
+          }
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "accepted": false,
+    "code": "unknown_field",
+    "path": "$.actions[0].run[0].program"
+  }
+}

@@ -18,6 +18,10 @@ For broader shape and validation rules, also read:
 
 `agent_definition_schema_version` identifies the Cargo AI contract used to interpret the definition. It is not an agent or package version; copy it from the current Cargo AI template or guidance rather than inventing a value from the current date or another version surface.
 
+The current strict revision is `2026-09-09.r1`. Valid earlier revisions keep legacy parsing behavior; every other revision at or after the cutoff is unsupported. Strict stable objects reject additional keys. `inputs` is optional, and `actions: []` is valid for a model-only definition. Each declared action has exactly `name`, `logic`, and a nonempty `run` array.
+
+Each `logic` or `when` object contains one supported operator. Use the exhaustive operator list in `agent-definition-contract.md`; unknown operators and `literal` are rejected. For an unconditional true gate, use `{ "==": [1, 1] }`. Existing scalar-reference, flat-variable and comparison-type rules still apply.
+
 ## Top-Level Action Execution
 - `action_execution`
   - Allowed values: `sequential`, `parallel`
@@ -48,15 +52,16 @@ These documented step kinds and helper fields are exhaustive for the current MVP
 - `exec`
   - Required: `kind`, `program`, `args`
 - `agent`
-  - Required: `kind`, `agent`
-  - Optional: `profile`, `usage_log`
+  - Required: `kind`, exactly one of `artifact` or legacy alias `agent`
+  - Optional: `profile`, `usage_log`, `inputs`, `input_mode`, `input_overrides`, `run_vars`, `ignore_tools`
 - `tool`
   - Required: `kind`, `name`
   - Optional: `params`, `output_variable`
   - Use this for Cargo AI-managed project-local tools created with `cargo ai add tool <name>`
-  - `params` values may be scalar literals or `{ "var": "<name>" }` references
+  - `params` values may be JSON literals, including bounded arrays/objects, or exact single-key `{ "var": "<name>" }` references; other objects remain literal data
   - Literal params are checked against the tool `describe.params` contract during validation; variable params are checked after resolution at runtime
   - The tool `describe.result` schema must be a nullable string; if `output_variable` is set, the actual `invoke` result must be a non-null string
+  - Every `invoke` response must contain exactly `protocol_version` and `result`; `result` must be present even when it is null
 - `email_me`
   - Required: `kind`, `subject`, `text`
 - `generate_image`
@@ -104,6 +109,9 @@ These documented step kinds and helper fields are exhaustive for the current MVP
   ```
 
 ## Optional Control Fields
+
+Every step allows its own kind-specific fields and the common controls below; extra fields are rejected in the strict revision. The JSON platform key is singular, `platform`.
+
 - `when`
   - JSON Logic object evaluated by the parent action runner.
 - `failure_mode`
@@ -136,12 +144,14 @@ These documented step kinds and helper fields are exhaustive for the current MVP
 ## Returned Output vs Actions
 
 - Top-level `agent_schema` fields are the returned output of the agent.
+- Raw structured model output must pass declared shape, type, enum, numeric-bound and resource checks before any action starts; missing or unknown fields cause rejection.
 - Action steps are side effects or follow-up orchestration after that output exists.
 - `output_variable` captures step-local text from `exec` or a non-null string result from `tool`. It does not change the returned top-level output object.
 - If `agent_schema.properties` is empty, Cargo AI skips the initial model call and starts directly at the action layer.
 - In that structural action-only shape, top-level `inputs` are allowed only as named reusable parent-owned inputs.
 - In that structural action-only shape, anonymous runtime `--input-*` flags remain invalid.
 - Use `--input-override NAME=VALUE` to satisfy or replace declared named top-level inputs at invocation time.
+- Validation establishes structural contracts, not the truth or trustworthiness of output. Model/tool output cannot add action steps or permissions; raw `exec` output remains text.
 
 ## Variable Namespace Rules
 - Captured names are flat. Dotted names are invalid.

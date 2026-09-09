@@ -551,6 +551,7 @@ fn validate_output_source_boundaries(
             .collect::<Vec<_>>(),
     ) {
         let relative_path = super::runtime_data::validate_declared_input(relative_path.as_str())?;
+        super::add::guidance::packaging::validate_declared(&relative_path)?;
         super::runtime_data::validate_source_tree(project_root, &relative_path, false)?;
         let source_path = project_root.join(relative_path);
         validate_project_source_path(project_root, &source_path, "Agent")?;
@@ -559,6 +560,7 @@ fn validate_output_source_boundaries(
 
     for relative_path in &build_profile.assets {
         let relative_path = super::runtime_data::validate_declared_input(relative_path)?;
+        super::add::guidance::packaging::validate_declared(&relative_path)?;
         super::runtime_data::validate_source_tree(project_root, &relative_path, false)?;
         let source_path = project_root.join(relative_path);
         validate_project_source_path(project_root, &source_path, "Asset")?;
@@ -982,6 +984,7 @@ fn copy_declared_path(
     require_json_file: bool,
 ) -> Result<(), String> {
     super::runtime_data::validate_declared_input(relative_path)?;
+    super::add::guidance::packaging::validate_declared(Path::new(relative_path))?;
     let relative_path = validate_project_relative_path(
         relative_path,
         if require_json_file { "Agent" } else { "Asset" },
@@ -1014,7 +1017,12 @@ fn copy_declared_path(
 
     let dest_path = package_root.join(&relative_path);
     if source_metadata.is_dir() {
-        copy_directory_recursive(project_root, source_path.as_path(), dest_path.as_path())
+        copy_directory_recursive(
+            project_root,
+            source_path.as_path(),
+            dest_path.as_path(),
+            super::add::guidance::packaging::is_bundle_path(&relative_path),
+        )
     } else {
         copy_file(project_root, source_path.as_path(), dest_path.as_path())
     }
@@ -1072,7 +1080,12 @@ fn copy_tool_source_root(
     )
 }
 
-fn copy_directory_recursive(project_root: &Path, source: &Path, dest: &Path) -> Result<(), String> {
+fn copy_directory_recursive(
+    project_root: &Path,
+    source: &Path,
+    dest: &Path,
+    declared_bundle: bool,
+) -> Result<(), String> {
     let metadata = validate_project_source_path(project_root, source, "Packaged directory")?;
     if !metadata.is_dir() {
         return Err(format!(
@@ -1111,9 +1124,18 @@ fn copy_directory_recursive(project_root: &Path, source: &Path, dest: &Path) -> 
         ) {
             continue;
         }
+        if super::add::guidance::packaging::skip_entry(project_root, &source_path, declared_bundle)?
+        {
+            continue;
+        }
         let metadata = validate_project_source_path(project_root, &source_path, "Packaged entry")?;
         if metadata.is_dir() {
-            copy_directory_recursive(project_root, source_path.as_path(), dest_path.as_path())?;
+            copy_directory_recursive(
+                project_root,
+                source_path.as_path(),
+                dest_path.as_path(),
+                declared_bundle,
+            )?;
         } else if metadata.is_file() {
             copy_file(project_root, source_path.as_path(), dest_path.as_path())?;
         } else {
@@ -1168,6 +1190,9 @@ fn copy_directory_recursive_skipping_target(
                 .strip_prefix(project_root)
                 .map_err(|error| error.to_string())?,
         ) {
+            continue;
+        }
+        if super::add::guidance::packaging::skip_entry(project_root, &source_path, false)? {
             continue;
         }
         let metadata =

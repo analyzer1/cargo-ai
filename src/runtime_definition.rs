@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "../tests/support/definition_validation_cases.rs"]
+mod boundary_cases;
+
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -46,6 +50,7 @@ pub(crate) struct RuntimeAgentDefinition {
     schema_properties: Vec<SchemaProperty>,
     action_execution: crate::ActionExecutionMode,
     actions: Vec<crate::Action>,
+    strict_definition: bool,
 }
 
 impl RuntimeAgentDefinition {
@@ -56,8 +61,8 @@ impl RuntimeAgentDefinition {
     }
 
     pub(crate) fn from_str(json_str: &str) -> Result<Self, String> {
-        let root = serde_json::from_str::<Value>(json_str)
-            .map_err(|error| format!("failed to parse agent JSON: {error}"))?;
+        let (root, revision) = crate::definition_validation::parse_definition(json_str)
+            .map_err(|error| error.to_string())?;
         let root_obj = expect_object(&root, "$")?;
 
         if root_obj.contains_key("version") {
@@ -88,6 +93,7 @@ impl RuntimeAgentDefinition {
             schema_properties,
             action_execution,
             actions,
+            strict_definition: revision == crate::definition_validation::DefinitionRevision::Strict,
         })
     }
 
@@ -132,7 +138,12 @@ impl RuntimeAgentDefinition {
         let parsed = serde_json::from_str::<Value>(raw).map_err(|_| {
             "The provider returned output that could not be parsed as JSON.".to_string()
         })?;
-        self.validate_response_value(&parsed)?;
+        if self.strict_definition {
+            crate::definition_validation::validate_model_output(&parsed, &self.json_schema_value())
+                .map_err(|error| error.to_string())?;
+        } else {
+            self.validate_response_value(&parsed)?;
+        }
         Ok(parsed)
     }
 
@@ -2498,7 +2509,7 @@ mod tests {
     #[test]
     fn schema_version_key_contract_matches_codegen_and_runtime() {
         let canonical = config_with_schema_header(
-            r#""agent_definition_schema_version": "2099-12-31.r42",
+            r#""agent_definition_schema_version": "2026-03-28.r1",
                 "unrelated_root_field": true"#,
         );
         assert_runtime_and_codegen_accept(&canonical);
@@ -2982,5 +2993,85 @@ mod tests {
 
         assert!(build_error.contains("nested child-agent paths"));
         assert!(runtime_error.contains("nested child-agent paths"));
+    }
+    #[test]
+    fn canonical_authoring_corpus_matches_interpreted_contract() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/definition_validation");
+        let mut paths = std::fs::read_dir(root)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+            .collect::<Vec<_>>();
+        paths.sort();
+        assert!(paths.len() >= 50);
+        for path in paths {
+            let case: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            let actual = RuntimeAgentDefinition::from_str(&case["definition"].to_string());
+            if case["expected"]["accepted"] == true {
+                assert!(actual.is_ok(), "{}: {actual:?}", path.display());
+            } else {
+                let error = crate::definition_validation::validate_definition(&case["definition"])
+                    .unwrap_err();
+                assert_eq!(
+                    serde_json::json!(error.code),
+                    case["expected"]["code"],
+                    "{}",
+                    path.display()
+                );
+                assert_eq!(
+                    serde_json::json!(error.path),
+                    case["expected"]["path"],
+                    "{}",
+                    path.display()
+                );
+                assert_eq!(actual.unwrap_err(), error.to_string(), "{}", path.display());
+            }
+        }
+    }
+    #[test]
+    fn canonical_resource_boundaries_match_interpreted_contract() {
+        let mut count = 0;
+        super::boundary_cases::visit_limit_cases(|name, value, expected| {
+            count += 1;
+            let actual = RuntimeAgentDefinition::from_str(&value.to_string());
+            if let Some((limit, path)) = expected {
+                let error = crate::definition_validation::validate_definition(value).unwrap_err();
+                assert_eq!(error.code, "limit_exceeded", "{name}: {error}");
+                assert_eq!(error.limit, Some(limit), "{name}: {error}");
+                assert_eq!(error.path, path, "{name}: {error}");
+                assert_eq!(actual.unwrap_err(), error.to_string(), "{name}");
+            } else {
+                assert!(actual.is_ok(), "{name}: {actual:?}");
+            }
+        });
+        assert_eq!(count, 46);
+    }
+
+    #[test]
+    fn interpreted_provider_output_has_bounded_evaluation() {
+        super::boundary_cases::visit_output_limit_cases(|name, value, schema, expected| {
+            let definition = serde_json::json!({"agent_definition_schema_version":"2026-09-09.r1","agent_schema":schema,"actions":[]});
+            let definition = RuntimeAgentDefinition::from_str(&definition.to_string()).unwrap();
+            let actual = definition.validate_provider_output(&value.to_string());
+            if let Some((limit, path)) = expected {
+                let error =
+                    crate::definition_validation::validate_model_output(value, schema).unwrap_err();
+                assert_eq!(error.limit, Some(limit), "{name}");
+                assert_eq!(error.path, path, "{name}");
+                assert_eq!(actual.unwrap_err(), error.to_string(), "{name}");
+            } else {
+                assert!(actual.is_ok(), "{name}: {actual:?}");
+            }
+        });
+    }
+    #[test]
+    fn malformed_json_uses_shared_interpreted_error() {
+        for raw in ["{", "not json", "[1,]", "{\"x\":NaN}"] {
+            let error = RuntimeAgentDefinition::from_str(raw).unwrap_err();
+            assert!(error.starts_with("invalid_json at $:"), "{error}");
+            assert!(error.contains("Correct the JSON syntax"));
+        }
     }
 }

@@ -1,0 +1,3 @@
+revision,location,animal,count,confidence,note
+original,north gate,deer,2,0.9,"near gate, ""east"""
+original,north gate,fox,1,0.75,

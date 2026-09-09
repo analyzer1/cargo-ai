@@ -1,0 +1,63 @@
+{
+  "name": "strict_scalar_enum_and_bounds",
+  "definition": {
+    "agent_definition_schema_version": "2026-09-09.r1",
+    "inputs": [
+      {
+        "type": "text",
+        "text": "Return answer as an integer."
+      }
+    ],
+    "agent_schema": {
+      "type": "object",
+      "properties": {
+        "answer": {
+          "type": "integer"
+        },
+        "label": {
+          "type": "string",
+          "description": "Declared enum.",
+          "enum": [
+            "yes",
+            "no"
+          ]
+        },
+        "score": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "ready": {
+          "type": "boolean"
+        }
+      }
+    },
+    "actions": [
+      {
+        "name": "print_answer",
+        "logic": {
+          "==": [
+            {
+              "var": "answer"
+            },
+            4
+          ]
+        },
+        "run": [
+          {
+            "kind": "exec",
+            "program": "echo",
+            "args": [
+              {
+                "var": "answer"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "accepted": true
+  }
+}

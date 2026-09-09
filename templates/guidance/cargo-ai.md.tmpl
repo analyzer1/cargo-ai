@@ -32,6 +32,8 @@ If no agent JSON exists yet:
 
 ## Local Guidance Bundle
 
+Use `cargo ai guidance status` before relying on an existing bundle. It is read-only and reports ownership, version and preservation problems. `cargo ai guidance update` is an explicit offline operation using the installed binary; do not run it merely because status reports an update. Preserve user instruction files and review any proposed loader snippet. Do not fabricate ownership metadata, delete recovery state, or overwrite locally modified/legacy bundles to make an update pass.
+
 Read these files before inventing structure:
 - `.cargo-ai/guidance/start-here.md`
 - `.cargo-ai/guidance/package-workflow.md`
@@ -60,10 +62,12 @@ Useful examples:
 ## Supplemental Public Context
 
 Use these for positioning, onboarding flow, and public examples:
-- public README: `https://github.com/analyzer1/cargo-ai#readme`
+- public README: `https://github.com/cargo-ai/cargo-ai#readme`
 - website: `https://cargo-ai.org`
 
 If these conflict with the local `.cargo-ai/guidance/` bundle, follow the local bundle for authoring behavior and validation rules.
+
+For setup, start from the official URL supplied by the user and follow its documentation links; do not guess the repository. Inspect installed versions, platform requirements and existing files first. Use `new` for a fresh directory and `init` for an existing one, preserving work and assistant instructions. Keep installs, authentication, access to existing credentials/state, permissions and sensitive actions explicit. Validate a first run and record remaining setup, unsupported capabilities, assistance and failures; do not claim universal one-prompt onboarding from one successful environment.
 
 For account-hosted definitions, remember the current split:
 - direct interpreted run:
@@ -152,6 +156,7 @@ For published packages, keep the contract narrow:
 - If Mermaid rendering is clearly supported, offer Mermaid as an option and ask whether the user wants it.
 - Use `cargo ai new` or `cargo ai init` when the workspace needs a Cargo AI project boundary before local tool authoring.
 - Use `cargo ai add guidance --style <assistant>` after bootstrap when the workspace needs an assistant discovery entrypoint for this guidance bundle.
+- Generated guidance is excluded from ordinary recursive build/package and tool-source copies unless a guidance path is explicitly declared as an asset. Never include guidance locks/recovery state, credentials or runtime data in a deliverable.
 - Treat `.cargo-ai/project.toml` as the source of truth for project identity and build profiles. Keep top-level `[project]` metadata (`name`, `version`) intact, and when a user wants `cargo ai build`, keep the profile explicit with:
   - `agent_definitions`
   - `hatched_agents`

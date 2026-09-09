@@ -1,0 +1,50 @@
+{
+  "name": "legacy_published_unknown_root_key",
+  "definition": {
+    "agent_definition_schema_version": "2026-03-03.r1",
+    "inputs": [
+      {
+        "type": "text",
+        "text": "Return answer as an integer."
+      }
+    ],
+    "agent_schema": {
+      "type": "object",
+      "properties": {
+        "answer": {
+          "type": "integer"
+        }
+      }
+    },
+    "actions": [
+      {
+        "name": "print_answer",
+        "logic": {
+          "==": [
+            {
+              "var": "answer"
+            },
+            4
+          ]
+        },
+        "run": [
+          {
+            "kind": "exec",
+            "program": "echo",
+            "args": [
+              {
+                "var": "answer"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "extension_note": {
+      "ignored": true
+    }
+  },
+  "expected": {
+    "accepted": true
+  }
+}

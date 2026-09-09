@@ -8,13 +8,17 @@ These patterns shape the JSON that drives the generated CLI tool.
 Keep top-level keys in this order:
 
 1. `agent_definition_schema_version`
-2. `inputs`
+2. optional `inputs`
 3. optional `action_execution`
 4. optional `runtime_vars`
 5. `agent_schema`
 6. `actions`
 
 `agent_definition_schema_version` identifies the Cargo AI contract used to interpret the definition. It is not the agent or package version; package version is `[project].version`. Copy the value from the current Cargo AI template or guidance instead of inventing one from the current date, a project/package version, or the Cargo AI product version.
+
+Use `2026-09-09.r1` for new definitions. Valid earlier revisions retain legacy parsing behavior; other revisions at or after this cutoff are unsupported. For an existing definition, review all fields against `agent-definition-contract.md` before selecting strict validation. Key order is for readability, not acceptance.
+
+Keep stable objects within their documented field lists. Put explanatory notes in a sidecar Markdown file instead of adding unknown JSON fields. Schema `properties`, runtime-variable names and child/tool parameter maps have open names with validated values; arbitrary tool literal data remains data. Do not add author-supplied `required`, `additionalProperties`, `format`, remote schema references or speculative schema keywords.
 
 Keep each action in this order:
 
@@ -43,6 +47,7 @@ Keep input objects easy to scan:
 - Use short, behavior-based action names such as `send_summary` or `notify_on_failure`.
 - Use explicit captured-variable names such as `child_status` or `report_error`.
 - Do not overload one variable name for multiple meanings.
+- Use valid generated Rust identifiers for top-level output fields, such as `summary` or `needs_review`, and avoid reserved words.
 
 ## Input and Runtime Strategy
 
@@ -155,6 +160,9 @@ When the user wants local-machine behavior:
 ## Validation Rhythm
 
 - Draft the JSON.
+- For model-only work, use `actions: []`; every declared action needs a nonempty `run` list.
+- Use supported JSON Logic operators; replace an intended constant true gate with `{ "==": [1, 1] }` instead of the unsupported `literal` operator.
 - If complexity grows, add the sidecar Markdown file.
 - Run `cargo ai hatch <agent-name> --config <config.json> --check`.
-- Fix errors before building.
+- Fix the reported code/path using its expected keys and correction before building. Follow the contract's resource limits; reduce or split oversized definitions rather than selecting a legacy revision to bypass checks.
+- Treat passing validation as structural proof. Exercise the actual workflow separately to check useful results and tool behavior.
