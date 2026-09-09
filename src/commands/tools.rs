@@ -1,4 +1,5 @@
 //! Tool lifecycle and runtime support for Cargo AI-managed companion binaries.
+use crate::agent_builder::build_target::CargoCompileProfile;
 use clap::ArgMatches;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -618,6 +619,7 @@ pub(crate) fn build_source_tool(
     build_target: &crate::agent_builder::build_target::BuildTarget,
     scope: ToolScope,
     project_root: &Path,
+    profile: CargoCompileProfile,
 ) -> Result<ResolvedTool, String> {
     if scope == ToolScope::Bundled {
         return Err("Bundled scope is not supported for `cargo ai tools build`.".to_string());
@@ -652,15 +654,12 @@ pub(crate) fn build_source_tool(
 
     let mut command = Command::new("cargo");
     command
-        .arg("build")
+        .args(build_target.cargo_args("build", profile))
         .arg("--manifest-path")
         .arg(&manifest_path)
         .current_dir(source_dir)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
-    if let Some(target) = build_target.cargo_target() {
-        command.arg("--target").arg(target);
-    }
 
     let status = command.status().map_err(|error| {
         format!(
@@ -672,7 +671,8 @@ pub(crate) fn build_source_tool(
         return Err(format!("Cargo build failed for tool '{}'.", tool_name));
     }
 
-    let built_binary_path = build_target.compiled_binary_path(source_dir, binary_name.as_str());
+    let built_binary_path =
+        build_target.compiled_binary_path(source_dir, binary_name.as_str(), profile);
     if !built_binary_path.exists() {
         return Err(format!(
             "Expected built tool binary '{}' at '{}', but it was not produced.",
@@ -689,6 +689,7 @@ pub(crate) fn build_source_tool(
     let tool_dir = scope_root.join(tool_name);
     let artifact_relative_path = PathBuf::from("bin")
         .join(build_target.cache_key_target())
+        .join(profile.name())
         .join(&binary_name);
     let artifact_path = tool_dir.join(&artifact_relative_path);
     if let Some(parent) = artifact_path.parent() {
@@ -817,7 +818,7 @@ pub(crate) fn materialize_source_tool_for_package_runtime(
 
     let mut command = Command::new("cargo");
     command
-        .arg("build")
+        .args(build_target.cargo_args("build", CargoCompileProfile::Release))
         .arg("--locked")
         .arg("--manifest-path")
         .arg(&source_manifest_path)
@@ -826,9 +827,6 @@ pub(crate) fn materialize_source_tool_for_package_runtime(
         .current_dir(source_dir)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
-    if let Some(target) = build_target.cargo_target() {
-        command.arg("--target").arg(target);
-    }
 
     let status = command.status().map_err(|error| {
         format!(
@@ -843,13 +841,11 @@ pub(crate) fn materialize_source_tool_for_package_runtime(
         ));
     }
 
-    let mut built_binary_dir = cargo_target_root.clone();
-    if let Some(target) = build_target.cargo_target() {
-        built_binary_dir.push(target);
-    }
-    built_binary_dir.push("debug");
-    let built_binary_path =
-        build_target.exported_binary_path(built_binary_dir.as_path(), binary_name.as_str());
+    let built_binary_path = build_target.compiled_binary_path(
+        &tool_scratch_root,
+        binary_name.as_str(),
+        CargoCompileProfile::Release,
+    );
     let built_binary_relative = built_binary_path.strip_prefix(scratch_root).map_err(|_| {
         format!(
             "Built packaged tool '{}' artifact '{}' escaped its scratch root '{}'.",
@@ -880,7 +876,9 @@ pub(crate) fn materialize_source_tool_for_package_runtime(
         Path::new(tool_name),
         format!("Installed package runtime tool '{}' root", tool_name).as_str(),
     )?;
-    let artifact_parent_relative = PathBuf::from("bin").join(build_target.cache_key_target());
+    let artifact_parent_relative = PathBuf::from("bin")
+        .join(build_target.cache_key_target())
+        .join(CargoCompileProfile::Release.name());
     let artifact_relative_path =
         build_target.exported_binary_path(artifact_parent_relative.as_path(), binary_name.as_str());
     let artifact_relative_text = artifact_relative_path.to_string_lossy().replace('\\', "/");
@@ -1256,9 +1254,16 @@ fn run_build(sub_m: &ArgMatches) -> bool {
             return false;
         }
     };
-    match build_source_tool(name, &build_target, ToolScope::Project, &project_root) {
+    match build_source_tool(
+        name,
+        &build_target,
+        ToolScope::Project,
+        &project_root,
+        CargoCompileProfile::Dev,
+    ) {
         Ok(resolved) => {
             println!("✓ Tool built");
+            println!("Cargo profile: {}", CargoCompileProfile::Dev.name());
             println!("Tool:   {}", resolved.tool_id);
             println!("Scope:  {}", display_scope(&resolved.scope));
             println!("Target: {}", resolved.target_triple);

@@ -85,6 +85,7 @@ fn prune_stale_rustc_parents(
 #[cfg(test)]
 mod tests {
     use super::prune_stale_template_cache;
+    use crate::agent_builder::build_target::CargoCompileProfile;
     use crate::agent_builder::template_cache::key::TemplateCacheKey;
     use std::fs;
     use std::path::PathBuf;
@@ -112,6 +113,7 @@ mod tests {
             binary_sha256: "sha-current".to_string(),
             rustc_version: "rustc-1.91.1".to_string(),
             target_triple: "aarch64-apple-darwin".to_string(),
+            compile_profile: CargoCompileProfile::Release,
         };
 
         let stale_hash_target = root
@@ -140,6 +142,11 @@ mod tests {
             fs::create_dir_all(path).expect("template cache fixture should be creatable");
         }
 
+        let active_profile = active_target.join("release");
+        let sibling_profile = active_target.join("dev");
+        fs::create_dir_all(&active_profile).unwrap();
+        fs::create_dir_all(&sibling_profile).unwrap();
+
         let removed = prune_stale_template_cache(&root, &active_key)
             .expect("pruning stale template cache should succeed");
 
@@ -148,6 +155,8 @@ mod tests {
         assert!(!root.join("sha-current").join("rustc-1.90.0").exists());
         assert!(active_target.exists());
         assert!(sibling_target.exists());
+        assert!(active_profile.exists());
+        assert!(sibling_profile.exists());
 
         let _ = fs::remove_dir_all(root);
     }
@@ -159,6 +168,7 @@ mod tests {
             binary_sha256: "sha-current".to_string(),
             rustc_version: "rustc-1.91.1".to_string(),
             target_triple: "aarch64-apple-darwin".to_string(),
+            compile_profile: CargoCompileProfile::Release,
         };
 
         let removed = prune_stale_template_cache(&missing_root, &active_key)

@@ -56,7 +56,7 @@ cargo ai build
 cargo ai build release --target aarch64-apple-darwin
 ```
 
-The positional profile defaults to `default`. Unless `--output-dir` is set, output goes to `target/cargo-ai/build/<profile>/<target>/`. The assembled root contains generated project metadata, copied definitions and assets, managed tool state, and root-level hatched binaries. Its generated tool policy is project-only so it does not silently depend on unrelated machine tools.
+The positional profile selects `[build.<profile>]` inputs and defaults to `default`; even a profile named `release` is an input selection. Final agents and tools always compile with Cargo’s release profile. The generated build manifest records this separately as `cargo_compile_profile = "release"`. Unless `--output-dir` is set, output goes to `target/cargo-ai/build/<profile>/<target>/release/`. The assembled root contains generated project metadata, copied definitions and assets, managed tool state, and root-level hatched binaries. Its generated tool policy is project-only so it does not silently depend on unrelated machine tools.
 
 Create a source-portable package from the same selection:
 
@@ -116,7 +116,7 @@ Local aliases are version-aware:
 
 Reinstalling identical content repairs missing, corrupt, or wrong-target disposable runtime state while preserving package data.
 
-A local-source install builds declared tools with the package lockfile for the current target. Compilation and validation are transactional: the verified source payload remains unchanged, only managed executable state enters `runtime/`, and failure leaves the previous alias and `data/` recoverable. The machine needs a compatible Rust toolchain and access to dependencies not already cached.
+A local-source install builds declared tools with `cargo build --locked --release` for the current target. Explicit approved hosted tool materialization uses the same compile profile. Cargo-native profile settings remain authoritative; existing installed artifacts are not silently rebuilt when Cargo AI changes. Compilation and validation are transactional: the verified source payload remains unchanged, only managed executable state enters `runtime/`, and failure leaves the previous alias and `data/` recoverable. The machine needs a compatible Rust toolchain and access to dependencies not already cached.
 
 ## Publish and pull hosted packages
 

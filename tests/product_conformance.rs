@@ -429,6 +429,8 @@ fn writing_tool_keeps_sibling_children_across_interpreted_generated_and_installe
     tool.push_str(r#"
 pub(crate) fn invoke(_params: BTreeMap<String, Value>, context: InvocationContext) -> Result<Option<String>, ToolError> {
     std::fs::write("result.txt", "owned output").map_err(|e| ToolError::new(e.to_string()))?;
+    std::fs::write("compile-mode.txt", if cfg!(debug_assertions) { "dev" } else { "release" })
+        .map_err(|e| ToolError::new(e.to_string()))?;
     let binary = if cfg!(windows) { "./child_probe.exe" } else { "./child_probe" };
     let child = context.invoke_agent(ChildAgentRequest::new(binary))?;
     if !child.stdout.contains("immutable seed") { return Err(ToolError::new("immutable input was lost")); }
@@ -478,6 +480,33 @@ pub(crate) fn invoke(_params: BTreeMap<String, Value>, context: InvocationContex
         &data_cli(&fixture, &project, &["tools", "build", "writer"]),
         "build tool",
     );
+    let author_manifest_path = project.join("tools/writer/Cargo.toml");
+    let author_lock_path = project.join("tools/writer/Cargo.lock");
+    let author_manifest = fs::read(&author_manifest_path).unwrap();
+    let author_lock = fs::read(&author_lock_path).unwrap();
+    let managed_tool: serde_json::Value = serde_json::from_slice(
+        &fs::read(project.join(".cargo-ai/tools/writer/tool.json")).unwrap(),
+    )
+    .unwrap();
+    let target = managed_tool["artifacts"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .next()
+        .unwrap()
+        .clone();
+    assert!(managed_tool["artifacts"][&target]["path"]
+        .as_str()
+        .unwrap()
+        .replace('\\', "/")
+        .contains("/dev/"));
+    for name in ["AGENTS.md", "CLAUDE.md"] {
+        fs::write(
+            project.join(name),
+            "user instructions; preserve these bytes",
+        )
+        .unwrap();
+    }
     assert!(!project.join(".cargo-ai/data").exists());
     assert_success(
         &data_cli(&fixture, &project, &["run", "--config", "parent.json"]),
@@ -488,17 +517,72 @@ pub(crate) fn invoke(_params: BTreeMap<String, Value>, context: InvocationContex
         "owned output"
     );
     assert!(!project.join("result.txt").exists());
+    assert_eq!(
+        fs::read_to_string(project.join(".cargo-ai/data/compile-mode.txt")).unwrap(),
+        "dev"
+    );
     assert!(!project.join(".cargo-ai/data/child.json").exists());
     fs::remove_file(project.join(".cargo-ai/data/result.txt")).unwrap();
-    assert_success(
-        &data_cli(
-            &fixture,
-            &project,
-            &["hatch", "owned", "--config", "parent.json"],
-        ),
-        "hatch writing parent",
+    let check = data_cli(
+        &fixture,
+        &project,
+        &["hatch", "checked", "--config", "parent.json", "--check"],
     );
+    assert_success(&check, "dev check before hatch");
+    assert!(output_text(&check).contains("Cargo profile  dev"));
+    assert!(!project
+        .join(if cfg!(windows) {
+            "checked.exe"
+        } else {
+            "checked"
+        })
+        .exists());
+    let hatch = data_cli(
+        &fixture,
+        &project,
+        &["hatch", "owned", "--config", "parent.json"],
+    );
+    assert_success(&hatch, "hatch writing parent");
+    assert!(output_text(&hatch).contains("Cargo profile  release"));
+    let recheck = data_cli(
+        &fixture,
+        &project,
+        &["hatch", "checked", "--config", "parent.json", "--check"],
+    );
+    assert_success(&recheck, "dev check after release hatch");
+    assert!(output_text(&recheck).contains("Reused warmed template"));
     let generated = project.join(if cfg!(windows) { "owned.exe" } else { "owned" });
+    let mut cache_roots = vec![fixture.cargo_ai_home.join("templates")];
+    for _ in 0..3 {
+        cache_roots = cache_roots
+            .into_iter()
+            .flat_map(|root| {
+                fs::read_dir(root)
+                    .unwrap()
+                    .map(|entry| entry.unwrap().path())
+                    .filter(|path| path.is_dir())
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+    }
+    assert_eq!(cache_roots.len(), 1);
+    let cache = &cache_roots[0];
+    assert!(cache.join("dev").is_dir());
+    assert!(cache.join("release").is_dir());
+    let release_target = cache.join("release/target");
+    let binaries = [
+        release_target.join("release"),
+        release_target.join(&target).join("release"),
+    ]
+    .into_iter()
+    .map(|dir| dir.join(generated.file_name().unwrap()))
+    .filter(|path| path.is_file())
+    .collect::<Vec<_>>();
+    assert_eq!(binaries.len(), 1);
+    assert_eq!(
+        fs::read(&generated).unwrap(),
+        fs::read(&binaries[0]).unwrap()
+    );
     assert_success(
         &data_command(&fixture, &generated, &project)
             .output()
@@ -530,7 +614,59 @@ pub(crate) fn invoke(_params: BTreeMap<String, Value>, context: InvocationContex
         "source data sentinel",
     )
     .unwrap();
-    fs::write(metadata, format!("{base}\n[build.default]\nagent_definitions = ['parent.json', 'child.json']\ntools = ['writer']\nassets = ['seed.txt', '{binary_name}']\n")).unwrap();
+    let selection = format!("agent_definitions = ['parent.json', 'child.json']\ntools = ['writer']\nassets = ['seed.txt', '{binary_name}']\n");
+    fs::write(&metadata, format!("{base}\n[build.default]\n{selection}hatched_agents = ['parent.json']\n[build.release]\n{selection}\n")).unwrap();
+    let build = data_cli(&fixture, &project, &["build"]);
+    assert_success(&build, "default release assembly");
+    assert!(output_text(&build).contains("Cargo profile: release"));
+    let built_root = project
+        .join("target/cargo-ai/build/default")
+        .join(&target)
+        .join("release");
+    let built_manifest: toml::Value =
+        toml::from_str(&fs::read_to_string(built_root.join("cargo-ai-build.toml")).unwrap())
+            .unwrap();
+    assert_eq!(built_manifest["profile"].as_str(), Some("default"));
+    assert_eq!(
+        built_manifest["cargo_compile_profile"].as_str(),
+        Some("release")
+    );
+    assert_success(
+        &data_command(
+            &fixture,
+            built_root.join(if cfg!(windows) {
+                "parent.exe"
+            } else {
+                "parent"
+            }),
+            &built_root,
+        )
+        .output()
+        .unwrap(),
+        "assembled release agent and tool",
+    );
+    assert_eq!(
+        fs::read_to_string(built_root.join(".cargo-ai/data/compile-mode.txt")).unwrap(),
+        "release"
+    );
+    let explicit_build = fixture.root.join("explicit-build");
+    assert_success(
+        &data_cli(
+            &fixture,
+            &project,
+            &[
+                "build",
+                "release",
+                "--output-dir",
+                explicit_build.to_str().unwrap(),
+            ],
+        ),
+        "named selection and exact output directory",
+    );
+    assert!(explicit_build.join("cargo-ai-build.toml").is_file());
+    assert!(!explicit_build.join("release").exists());
+    assert_eq!(fs::read(&author_manifest_path).unwrap(), author_manifest);
+    assert_eq!(fs::read(&author_lock_path).unwrap(), author_lock);
     let package = fixture.root.join("package");
     assert_success(
         &data_cli(
@@ -547,6 +683,16 @@ pub(crate) fn invoke(_params: BTreeMap<String, Value>, context: InvocationContex
     );
     assert!(!package.join(".cargo-ai/data").exists());
     assert!(!package.join("tools/writer/.cargo-ai/data").exists());
+    assert!(!package.join("tools/writer/target").exists());
+    assert!(!package.join(".cargo-ai/tools/writer/bin").exists());
+    assert_eq!(
+        fs::read(package.join("tools/writer/Cargo.toml")).unwrap(),
+        author_manifest
+    );
+    assert_eq!(
+        fs::read(package.join("tools/writer/Cargo.lock")).unwrap(),
+        author_lock
+    );
     let recipient = Fixture::new("recipient");
     assert_success(
         &data_cli(
@@ -588,6 +734,24 @@ pub(crate) fn invoke(_params: BTreeMap<String, Value>, context: InvocationContex
         fs::read_to_string(
             recipient
                 .cargo_ai_home
+                .join("packages/owned/data/compile-mode.txt")
+        )
+        .unwrap(),
+        "release"
+    );
+    assert_eq!(
+        fs::read(
+            recipient
+                .cargo_ai_home
+                .join("packages/owned/package/tools/writer/Cargo.toml")
+        )
+        .unwrap(),
+        author_manifest
+    );
+    assert_eq!(
+        fs::read_to_string(
+            recipient
+                .cargo_ai_home
                 .join("packages/owned/data/result.txt")
         )
         .unwrap(),
@@ -616,6 +780,45 @@ pub(crate) fn invoke(_params: BTreeMap<String, Value>, context: InvocationContex
         .unwrap(),
         "owned output"
     );
+    // Cargo-native profile overrides remain authoritative and source-owned.
+    let customized_manifest = format!(
+        "{}\n[profile.release]\ndebug-assertions = true\n",
+        String::from_utf8(author_manifest).unwrap()
+    );
+    fs::write(&author_manifest_path, &customized_manifest).unwrap();
+    let custom_build = fixture.root.join("custom-profile");
+    assert_success(
+        &data_cli(
+            &fixture,
+            &project,
+            &[
+                "build",
+                "release",
+                "--output-dir",
+                custom_build.to_str().unwrap(),
+            ],
+        ),
+        "Cargo-native release settings",
+    );
+    assert_success(
+        &data_cli(&fixture, &custom_build, &["run", "--config", "parent.json"]),
+        "customized release tool",
+    );
+    assert_eq!(
+        fs::read_to_string(custom_build.join(".cargo-ai/data/compile-mode.txt")).unwrap(),
+        "dev"
+    );
+    assert_eq!(
+        fs::read_to_string(&author_manifest_path).unwrap(),
+        customized_manifest
+    );
+    assert_eq!(fs::read(&author_lock_path).unwrap(), author_lock);
+    for name in ["AGENTS.md", "CLAUDE.md"] {
+        assert_eq!(
+            fs::read_to_string(project.join(name)).unwrap(),
+            "user instructions; preserve these bytes"
+        );
+    }
 }
 
 fn verify_project_image_paths(fixture: &Fixture, project: &std::path::Path) {

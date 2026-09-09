@@ -7,7 +7,7 @@ pub fn command() -> Command {
         .about("Manage Cargo AI tool artifacts and contracts")
         .subcommand(
             Command::new("build")
-                .about("Build a source-backed tool and materialize its managed artifact")
+                .about("Build a source-backed tool with the Cargo dev profile and materialize its managed artifact")
                 .arg(
                     Arg::new("name")
                         .help("Tool name")

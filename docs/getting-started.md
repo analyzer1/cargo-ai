@@ -95,7 +95,7 @@ Validate the definition and generated project without exporting a binary:
 cargo ai hatch first-agent --config ./agent.json --check
 ```
 
-Then hatch the native executable:
+The check uses Cargo’s dev profile and exports no binary. Then hatch the native executable with Cargo’s release profile:
 
 ```bash
 cargo ai hatch first-agent --config ./agent.json

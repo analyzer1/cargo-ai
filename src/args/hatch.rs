@@ -4,7 +4,7 @@ use clap::{Arg, ArgAction, ArgGroup, Command};
 /// Builds the `hatch` command schema.
 pub fn command() -> Command {
     Command::new("hatch")
-        .about("Hatch a new AI agent from an agent definition JSON source")
+        .about("Hatch a native agent from JSON using the Cargo release profile")
         .group(
             ArgGroup::new("explicit_definition_source")
                 .args(["config", "json", "stdin"]),
@@ -19,7 +19,7 @@ pub fn command() -> Command {
         .arg(
             Arg::new("check")
                 .long("check")
-                .help("Validate scaffold and compile path with `cargo check` (no binary export)")
+                .help("Validate scaffold and compile path with Cargo dev-profile `check` (no binary export)")
                 .required(false)
                 .action(clap::ArgAction::SetTrue),
         )

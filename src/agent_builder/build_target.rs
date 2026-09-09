@@ -3,6 +3,28 @@
 use std::env;
 use std::path::{Path, PathBuf};
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CargoCompileProfile {
+    Dev,
+    Release,
+}
+
+impl CargoCompileProfile {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Dev => "dev",
+            Self::Release => "release",
+        }
+    }
+
+    pub(crate) fn output_directory(self) -> &'static str {
+        match self {
+            Self::Dev => "debug",
+            Self::Release => "release",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct BuildTarget {
     cargo_target: Option<String>,
@@ -37,8 +59,11 @@ impl BuildTarget {
         &self.cache_key_target
     }
 
-    pub(crate) fn cargo_args(&self, command: &str) -> Vec<String> {
+    pub(crate) fn cargo_args(&self, command: &str, profile: CargoCompileProfile) -> Vec<String> {
         let mut args = vec![command.to_string()];
+        if profile == CargoCompileProfile::Release {
+            args.push("--release".to_string());
+        }
         if let Some(target_triple) = self.cargo_target() {
             args.push("--target".to_string());
             args.push(target_triple.to_string());
@@ -46,12 +71,19 @@ impl BuildTarget {
         args
     }
 
-    pub(crate) fn compiled_binary_path(&self, project_path: &Path, agent_name: &str) -> PathBuf {
+    pub(crate) fn compiled_binary_path(
+        &self,
+        project_path: &Path,
+        agent_name: &str,
+        profile: CargoCompileProfile,
+    ) -> PathBuf {
         let mut source_path = project_path.join("target");
         if let Some(target_triple) = self.cargo_target() {
             source_path = source_path.join(target_triple);
         }
-        source_path = source_path.join("debug").join(agent_name);
+        source_path = source_path
+            .join(profile.output_directory())
+            .join(agent_name);
         if self.uses_windows_exe() {
             source_path.set_extension("exe");
         }
@@ -83,7 +115,7 @@ fn configured_target_triple() -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::BuildTarget;
+    use super::{BuildTarget, CargoCompileProfile};
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -94,7 +126,7 @@ mod tests {
         };
 
         assert_eq!(
-            target.cargo_args("check"),
+            target.cargo_args("check", CargoCompileProfile::Dev),
             vec![
                 "check".to_string(),
                 "--target".to_string(),
@@ -113,11 +145,15 @@ mod tests {
 
         assert_eq!(target.cache_key_target(), "x86_64-pc-windows-msvc");
         assert_eq!(
-            target.compiled_binary_path(&project_path, "weather_test"),
+            target.compiled_binary_path(
+                &project_path,
+                "weather_test",
+                CargoCompileProfile::Release
+            ),
             project_path
                 .join("target")
                 .join("x86_64-pc-windows-msvc")
-                .join("debug")
+                .join("release")
                 .join("weather_test.exe")
         );
         assert_eq!(
@@ -130,5 +166,36 @@ mod tests {
     fn empty_target_triple_is_rejected() {
         let err = BuildTarget::from_cli(Some("   ")).expect_err("empty target triple should fail");
         assert!(err.contains("--target"));
+    }
+
+    #[test]
+    fn compile_profile_separates_arguments_and_artifacts_on_every_target() {
+        for triple in [
+            None,
+            Some("aarch64-apple-darwin"),
+            Some("x86_64-pc-windows-msvc"),
+        ] {
+            let target = BuildTarget::from_cli(triple).unwrap();
+            let dev = target.compiled_binary_path(
+                Path::new("project"),
+                "probe",
+                CargoCompileProfile::Dev,
+            );
+            let release = target.compiled_binary_path(
+                Path::new("project"),
+                "probe",
+                CargoCompileProfile::Release,
+            );
+            assert_ne!(dev, release);
+            assert_eq!(dev.parent().unwrap().file_name().unwrap(), "debug");
+            assert_eq!(release.parent().unwrap().file_name().unwrap(), "release");
+            assert_eq!(dev.file_name(), release.file_name());
+            assert!(!target
+                .cargo_args("check", CargoCompileProfile::Dev)
+                .contains(&"--release".to_string()));
+            assert!(target
+                .cargo_args("build", CargoCompileProfile::Release)
+                .contains(&"--release".to_string()));
+        }
     }
 }

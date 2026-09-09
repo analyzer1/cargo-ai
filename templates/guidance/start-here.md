@@ -89,7 +89,7 @@ When the user wants to share, install, update, or roll back reusable agents/tool
 10. If the flow becomes complex, recommend a same-name sidecar Markdown file.
 11. Validate with:
    - `cargo ai hatch <agent-name> --config <config.json> --check`
-12. Fix reported errors before building.
+12. Fix reported errors before building. `hatch --check` uses the Cargo dev profile without exporting a binary; ordinary hatch exports a release-profile executable. Keep Cargo compile profiles separate from project build profiles that select package inputs.
 
 ## Behavioral Defaults
 

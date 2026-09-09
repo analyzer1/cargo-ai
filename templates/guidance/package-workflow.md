@@ -34,6 +34,8 @@ tools = ["database_query"]
 assets = ["assets/prompts/"]
 ```
 
+Cargo AI build profiles select inputs; a profile named `release` does not select Cargo optimization settings. Final `cargo ai build` agents/tools compile with Cargo’s release profile, and the default assembled path is `target/cargo-ai/build/<profile>/<target>/release/`. Cargo manifests own optimization settings. `cargo ai package` remains source-only.
+
 Keep build lists explicit. `cargo ai package` and `cargo ai build` do not infer tools or agents from JSON references.
 
 The package permission request is also explicit. Omit `[package.permissions]` when subprocess execution is not needed; Cargo AI keeps it blocked by default. Unsupported permission keys or values fail during packaging. A hosted install or version transition still requires the user to review and accept an `allowed` subprocess request. Treat that acceptance as a publisher-trust decision: hosted Rust tool materialization may execute build scripts, procedural macros, and related Cargo build-time code without an operating-system sandbox, using the current user's ambient filesystem, environment, and network authority.
@@ -63,7 +65,7 @@ cargo ai packages uninstall data_integration
 
 Local alias behavior is version-aware: same version and hash is normally a no-op, newer semver upgrades, older semver requires `--downgrade`, and same-version content replacement or different package identity requires `--replace`. Reinstalling the same content repairs missing, corrupt, or wrong-target disposable runtime state while preserving `data/`.
 
-Local-source installation builds declared source-backed tools with `cargo build --locked` for the current target. Compilation and artifact validation happen in the alias transaction: verified `package/` stays unchanged, only managed executable state enters disposable `runtime/`, and a failure leaves the previous alias plus `data/` recoverable. A compatible Rust toolchain and any uncached dependencies must be available.
+Local-source installation builds declared source-backed tools with `cargo build --locked --release` for the current target. Existing installed artifacts are not silently rebuilt by upgrading Cargo AI; explicit installation/update/rollback repair follows the normal lifecycle. Compilation and artifact validation happen in the alias transaction: verified `package/` stays unchanged, only managed executable state enters disposable `runtime/`, and a failure leaves the previous alias plus `data/` recoverable. A compatible Rust toolchain and any uncached dependencies must be available.
 
 Bare package names without `--account` are local-only. They must not trigger network lookup.
 

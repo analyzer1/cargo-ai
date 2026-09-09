@@ -1,6 +1,6 @@
 //! Handles compiling an agent workspace into an executable.
 
-use super::build_target::BuildTarget;
+use super::build_target::{BuildTarget, CargoCompileProfile};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -11,7 +11,13 @@ pub fn build_agent_project(
     shared_target_dir: Option<&Path>,
 ) -> Result<(), std::io::Error> {
     let project_path = super::agent_workspace_path(agent_name);
-    run_cargo_compile_in_path(&project_path, "build", build_target, shared_target_dir)
+    run_cargo_compile_in_path(
+        &project_path,
+        "build",
+        build_target,
+        CargoCompileProfile::Release,
+        shared_target_dir,
+    )
 }
 
 /// Runs `cargo check` for the agent project at the given path.
@@ -21,21 +27,29 @@ pub fn check_agent_project(
     shared_target_dir: Option<&Path>,
 ) -> Result<(), std::io::Error> {
     let project_path = super::agent_workspace_path(agent_name);
-    run_cargo_compile_in_path(&project_path, "check", build_target, shared_target_dir)
+    run_cargo_compile_in_path(
+        &project_path,
+        "check",
+        build_target,
+        CargoCompileProfile::Dev,
+        shared_target_dir,
+    )
 }
 
 /// Builds an arbitrary workspace path with `cargo build`.
 pub(crate) fn build_workspace(
     project_path: &Path,
     build_target: &BuildTarget,
+    profile: CargoCompileProfile,
 ) -> Result<(), std::io::Error> {
-    run_cargo_compile_in_path(project_path, "build", build_target, None)
+    run_cargo_compile_in_path(project_path, "build", build_target, profile, None)
 }
 
 fn run_cargo_compile_in_path(
     project_path: &Path,
     command: &str,
     build_target: &BuildTarget,
+    profile: CargoCompileProfile,
     shared_target_dir: Option<&Path>,
 ) -> Result<(), std::io::Error> {
     if !project_path.exists() {
@@ -45,8 +59,13 @@ fn run_cargo_compile_in_path(
         ));
     }
 
-    let mut cargo_command =
-        prepare_cargo_compile_command(project_path, command, build_target, shared_target_dir);
+    let mut cargo_command = prepare_cargo_compile_command(
+        project_path,
+        command,
+        build_target,
+        profile,
+        shared_target_dir,
+    );
 
     let status = cargo_command.status()?;
 
@@ -72,11 +91,12 @@ fn prepare_cargo_compile_command(
     project_path: &Path,
     command: &str,
     build_target: &BuildTarget,
+    profile: CargoCompileProfile,
     shared_target_dir: Option<&Path>,
 ) -> Command {
     let mut cargo_command = Command::new("cargo");
     cargo_command
-        .args(build_target.cargo_args(command))
+        .args(build_target.cargo_args(command, profile))
         .current_dir(project_path)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
@@ -91,7 +111,7 @@ fn prepare_cargo_compile_command(
 #[cfg(test)]
 mod tests {
     use super::prepare_cargo_compile_command;
-    use crate::agent_builder::build_target::BuildTarget;
+    use crate::agent_builder::build_target::{BuildTarget, CargoCompileProfile};
     use std::ffi::OsString;
     use std::path::Path;
 
@@ -103,6 +123,7 @@ mod tests {
             Path::new("/tmp/demo-agent"),
             "check",
             &build_target,
+            CargoCompileProfile::Dev,
             Some(Path::new("/tmp/shared-target")),
         );
 
@@ -142,6 +163,7 @@ mod tests {
             Path::new("/tmp/demo-agent"),
             "build",
             &build_target,
+            CargoCompileProfile::Release,
             Some(Path::new("/tmp/shared-target")),
         );
 
@@ -163,6 +185,7 @@ mod tests {
             args,
             vec![
                 OsString::from("build"),
+                OsString::from("--release"),
                 OsString::from("--target"),
                 OsString::from("x86_64-pc-windows-msvc"),
             ]
@@ -180,6 +203,7 @@ mod tests {
             Path::new("/tmp/demo-agent"),
             "build",
             &build_target,
+            CargoCompileProfile::Release,
             None,
         );
 

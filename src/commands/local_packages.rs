@@ -3930,6 +3930,7 @@ assets = ["schemas/customer.sql"]
                 .join(tool_name)
                 .join("bin")
                 .join(target)
+                .join("release")
                 .as_path(),
             tool_name,
         )

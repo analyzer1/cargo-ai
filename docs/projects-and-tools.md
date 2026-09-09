@@ -130,6 +130,8 @@ cargo ai tools check --config ./my_agent.json
 cargo ai hatch my_agent --config ./my_agent.json --check
 ```
 
+`cargo ai tools build` uses Cargo’s dev profile for the authoring loop. Final `cargo ai build` artifacts and tools materialized by package installation use the release profile. Managed tool paths separate the target and compile profile; existing tool manifests remain readable, and existing installations are rebuilt only through an explicit lifecycle operation. Configure optimization in the tool’s `Cargo.toml`, not in Cargo AI build-profile metadata.
+
 Use the target triple for the platform you are building. `tools lint` statically checks Cargo AI metadata linkage and source/scaffold expectations for a project-local source-backed tool. Machine-only and binary-only tools are not lint targets. `tools check` exercises the tool contract, while `hatch --check` validates the agent scaffold and compile path without exporting a binary.
 
 Wire the tool into agent JSON with a tool action:

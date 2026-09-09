@@ -1,4 +1,5 @@
 //! Runtime behavior for `cargo ai build`.
+use crate::agent_builder::build_target::CargoCompileProfile;
 use clap::ArgMatches;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -81,6 +82,7 @@ struct LoadedProjectMetadata {
 struct BuildManifestDocument {
     format_version: u32,
     profile: String,
+    cargo_compile_profile: String,
     target: String,
     agent_definitions: Vec<String>,
     hatched_agents: Vec<BuildManifestHatchedAgent>,
@@ -138,6 +140,7 @@ pub fn run(sub_m: &ArgMatches) -> bool {
     };
 
     println!("Building profile `{profile_name}`...");
+    println!("Cargo profile: {}", CargoCompileProfile::Release.name());
     println!("Project: {}", project_root.display());
     println!("Target:  {}", build_target.cache_key_target());
     println!("Output:  {}", output_root.path.display());
@@ -153,7 +156,8 @@ pub fn run(sub_m: &ArgMatches) -> bool {
     ) {
         Ok(manifest) => {
             println!("✓ Build assembled");
-            println!("Profile: {}", manifest.profile);
+            println!("Build profile: {}", manifest.profile);
+            println!("Cargo profile: {}", manifest.cargo_compile_profile);
             println!("Target:  {}", manifest.target);
             println!("Output:  {}", output_root.path.display());
             if !manifest.hatched_agents.is_empty() {
@@ -248,7 +252,8 @@ fn resolve_build_output_root(
                 .join("cargo-ai")
                 .join("build")
                 .join(profile_name)
-                .join(build_target.cache_key_target()),
+                .join(build_target.cache_key_target())
+                .join(CargoCompileProfile::Release.name()),
             explicit: false,
         });
     };
@@ -358,6 +363,7 @@ fn assemble_build_root(
     let manifest = BuildManifestDocument {
         format_version: 1,
         profile: profile_name.to_string(),
+        cargo_compile_profile: CargoCompileProfile::Release.name().to_string(),
         target: build_target.cache_key_target().to_string(),
         agent_definitions,
         hatched_agents: hatched_agents
@@ -548,9 +554,11 @@ fn materialize_build_tool(
         build_target,
         crate::commands::tools::ToolScope::Project,
         project_root,
+        CargoCompileProfile::Release,
     )?;
     let artifact_relative_path = PathBuf::from("bin")
         .join(build_target.cache_key_target())
+        .join(CargoCompileProfile::Release.name())
         .join(resolved.binary_name.as_str());
     let output_tool_dir = build_root.join(PROJECT_TOOLS_RELATIVE_PATH).join(tool_name);
     let artifact_path = output_tool_dir.join(&artifact_relative_path);
@@ -715,6 +723,7 @@ fn hatch_agent_into_build_root(
     let warmed_template =
         crate::agent_builder::template_cache::ensure_warmed_template_with_prepare_hook(
             build_target,
+            CargoCompileProfile::Release,
             || {},
         )
         .map_err(|error| format!("Failed to prepare warmed template: {error}"))?;
@@ -1076,6 +1085,31 @@ assets = ["assets/prompts/"]
                 assets: vec!["assets/prompts/".to_string()],
             }
         );
+    }
+
+    #[test]
+    fn default_output_separates_assembly_and_cargo_profiles() {
+        let target =
+            crate::agent_builder::build_target::BuildTarget::from_cli(Some("aarch64-apple-darwin"))
+                .unwrap();
+        let project = std::env::current_dir().unwrap().join("fixture-project");
+        for assembly in ["default", "release"] {
+            let output =
+                super::resolve_build_output_root(&project, assembly, &target, None).unwrap();
+            assert_eq!(
+                output.path,
+                project
+                    .join("target/cargo-ai/build")
+                    .join(assembly)
+                    .join("aarch64-apple-darwin/release")
+            );
+            assert!(!output.explicit);
+        }
+        let explicit =
+            super::resolve_build_output_root(&project, "release", &target, Some("chosen-output"))
+                .unwrap();
+        assert_eq!(explicit.path, PathBuf::from("chosen-output"));
+        assert!(explicit.explicit);
     }
 
     #[test]
