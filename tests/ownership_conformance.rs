@@ -480,10 +480,8 @@ fn animal_patrol_keeps_editable_source_and_independent_owned_results() {
         build_manifest["hatched_agents"][0]["binary"].as_str(),
         Some(executable("patrol").as_str())
     );
-    let built_tool = format!(
-        ".cargo-ai/tools/csv_writer/bin/{target}/release/{}",
-        executable("csv_writer")
-    );
+    // Project builds retain binary.default_name; installed runtime exports add the target suffix.
+    let built_tool = format!(".cargo-ai/tools/csv_writer/bin/{target}/release/csv_writer");
     exact_inventory(
         &tree(&built),
         &[
