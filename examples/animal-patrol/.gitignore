@@ -1,0 +1,5 @@
+target/
+**/target/
+.cargo-ai/data/
+.cargo-ai/tools/*/bin/
+.cargo-ai/publish-requests/

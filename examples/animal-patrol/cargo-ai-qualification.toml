@@ -1,0 +1,16 @@
+format_version = 1
+package_id = "animal_patrol"
+profile = "default"
+platforms = ["ubuntu", "macos", "windows"]
+
+[[entrypoints]]
+name = "patrol"
+run = true
+hatch = true
+
+[entrypoints.fixture]
+kind = "image_findings_csv"
+response = "fixtures/findings.json"
+image = "assets/patrol.png"
+expected_csv = "fixtures/expected.csv"
+spdx = "spdx.json"

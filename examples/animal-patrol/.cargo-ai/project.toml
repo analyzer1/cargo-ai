@@ -1,0 +1,22 @@
+format_version = 1
+
+[project]
+name = "animal_patrol"
+version = "0.1.0"
+description = "Inspect a wildlife image, review structured observations, and append them to a locally owned CSV. The bundled image is AI-generated."
+license = "MIT"
+
+[runtime]
+data_root = ".cargo-ai/data"
+
+[tools]
+allow_global_fallback = false
+
+[package.permissions]
+subprocess = "allowed"
+
+[build.default]
+agent_definitions = ["patrol.json"]
+hatched_agents = ["patrol.json"]
+tools = ["csv_writer"]
+assets = ["assets/patrol.png", "assets/PROVENANCE.md", "LICENSE", "README.md", "spdx.json"]

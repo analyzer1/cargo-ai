@@ -1,0 +1,10 @@
+{
+  "binary": {
+    "default_name": "csv_writer"
+  },
+  "schema_version": 1,
+  "source": {
+    "manifest_path": "tools/csv_writer/Cargo.toml"
+  },
+  "tool_id": "csv_writer"
+}

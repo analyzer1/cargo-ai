@@ -1,0 +1,641 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "Animal Patrol 0.1.0 assembled-source inventory",
+  "documentNamespace": "https://cargo-ai.org/spdx/animal-patrol-0.1.0-704fc4f0bfa8454ffb43083ca0f350b7efa579e6",
+  "creationInfo": {
+    "creators": [
+      "Tool: Cargo AI package inventory preparation 1"
+    ],
+    "created": "2026-09-10T00:00:00Z",
+    "comment": "Generated from assembled bytes, Cargo.lock checksums and cargo metadata license declarations. No package code executed for inventory collection."
+  },
+  "packages": [
+    {
+      "name": "Animal Patrol",
+      "SPDXID": "SPDXRef-AnimalPatrol",
+      "versionInfo": "0.1.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": true,
+      "packageVerificationCode": {
+        "packageVerificationCodeValue": "704fc4f0bfa8454ffb43083ca0f350b7efa579e6",
+        "packageVerificationCodeExcludedFiles": [
+          "./spdx.json",
+          "./cargo-ai-package.toml"
+        ]
+      },
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "licenseInfoFromFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION",
+      "comment": "Inventory of assembled package content. This document and the generated manifest that hashes it are excluded to avoid self-reference. The generated image is labeled in assets/PROVENANCE.md. Dependencies describe resolved source components, not a security certification. Archive and source revision identities are recorded separately."
+    },
+    {
+      "name": "csv_writer",
+      "SPDXID": "SPDXRef-Crate-csv-writer-0.1.0",
+      "versionInfo": "0.1.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/csv_writer@0.1.0"
+        }
+      ]
+    },
+    {
+      "name": "itoa",
+      "SPDXID": "SPDXRef-Crate-itoa-1.0.18",
+      "versionInfo": "1.0.18",
+      "downloadLocation": "https://crates.io/api/v1/crates/itoa/1.0.18/download",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/itoa@1.0.18"
+        }
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
+        }
+      ]
+    },
+    {
+      "name": "memchr",
+      "SPDXID": "SPDXRef-Crate-memchr-2.8.3",
+      "versionInfo": "2.8.3",
+      "downloadLocation": "https://crates.io/api/v1/crates/memchr/2.8.3/download",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "Unlicense OR MIT",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/memchr@2.8.3"
+        }
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
+        }
+      ]
+    },
+    {
+      "name": "proc-macro2",
+      "SPDXID": "SPDXRef-Crate-proc-macro2-1.0.107",
+      "versionInfo": "1.0.107",
+      "downloadLocation": "https://crates.io/api/v1/crates/proc-macro2/1.0.107/download",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/proc-macro2@1.0.107"
+        }
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
+        }
+      ]
+    },
+    {
+      "name": "quote",
+      "SPDXID": "SPDXRef-Crate-quote-1.0.47",
+      "versionInfo": "1.0.47",
+      "downloadLocation": "https://crates.io/api/v1/crates/quote/1.0.47/download",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/quote@1.0.47"
+        }
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001"
+        }
+      ]
+    },
+    {
+      "name": "serde",
+      "SPDXID": "SPDXRef-Crate-serde-1.0.229",
+      "versionInfo": "1.0.229",
+      "downloadLocation": "https://crates.io/api/v1/crates/serde/1.0.229/download",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/serde@1.0.229"
+        }
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
+        }
+      ]
+    },
+    {
+      "name": "serde_core",
+      "SPDXID": "SPDXRef-Crate-serde-core-1.0.229",
+      "versionInfo": "1.0.229",
+      "downloadLocation": "https://crates.io/api/v1/crates/serde_core/1.0.229/download",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/serde_core@1.0.229"
+        }
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "67dca2c9c51e58a4791a4b1ed58308b39c64224d349a935ab5039aa360942a48"
+        }
+      ]
+    },
+    {
+      "name": "serde_derive",
+      "SPDXID": "SPDXRef-Crate-serde-derive-1.0.229",
+      "versionInfo": "1.0.229",
+      "downloadLocation": "https://crates.io/api/v1/crates/serde_derive/1.0.229/download",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/serde_derive@1.0.229"
+        }
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
+        }
+      ]
+    },
+    {
+      "name": "serde_json",
+      "SPDXID": "SPDXRef-Crate-serde-json-1.0.151",
+      "versionInfo": "1.0.151",
+      "downloadLocation": "https://crates.io/api/v1/crates/serde_json/1.0.151/download",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/serde_json@1.0.151"
+        }
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
+        }
+      ]
+    },
+    {
+      "name": "syn",
+      "SPDXID": "SPDXRef-Crate-syn-3.0.4",
+      "versionInfo": "3.0.4",
+      "downloadLocation": "https://crates.io/api/v1/crates/syn/3.0.4/download",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT OR Apache-2.0",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/syn@3.0.4"
+        }
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "e6275cddf4610d1775e6d1fe9469b2e77d0f39fd98fb7450901b821e0c53649f"
+        }
+      ]
+    },
+    {
+      "name": "unicode-ident",
+      "SPDXID": "SPDXRef-Crate-unicode-ident-1.0.24",
+      "versionInfo": "1.0.24",
+      "downloadLocation": "https://crates.io/api/v1/crates/unicode-ident/1.0.24/download",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "(MIT OR Apache-2.0) AND Unicode-3.0",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/unicode-ident@1.0.24"
+        }
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+        }
+      ]
+    },
+    {
+      "name": "zmij",
+      "SPDXID": "SPDXRef-Crate-zmij-1.0.23",
+      "versionInfo": "1.0.23",
+      "downloadLocation": "https://crates.io/api/v1/crates/zmij/1.0.23/download",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/zmij@1.0.23"
+        }
+      ],
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+        }
+      ]
+    }
+  ],
+  "files": [
+    {
+      "fileName": "./.cargo-ai/project.toml",
+      "SPDXID": "SPDXRef-File-bc3c21112696844cd4827a7a",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "e8abf8335de618e4749232eb773366d9491fc7f6"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "97daa13517cf55cd13240d4d6d9b6e924d465a714aefb9eaac3de4aa8b41594b"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "fileName": "./.cargo-ai/tools/csv_writer/tool.json",
+      "SPDXID": "SPDXRef-File-54c2ebbff6ebc5defd8253a5",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "d00407eb5d5ebe00bdf57e54200e8880adda82d9"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "1d1b4eeb493bf931040fb898e8f4cde2647944cce2f5e6683becc5b00b085ddc"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "fileName": "./LICENSE",
+      "SPDXID": "SPDXRef-File-c693279643b8cd5d248172d9",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "9cf4a4d70b4f1cce148fff131b8de2901fb7f935"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "384ce83957ca54f1f4fe985b79cbde7bb8d390de588d124572c1f8184d4ebf0a"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "fileName": "./README.md",
+      "SPDXID": "SPDXRef-File-b335630551682c19a781afeb",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "f980ebf687b4d07c9b609e71dd4c20cc0b30945b"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "7cda691b7cfaf0e1c1af47233d79d2573801694e8935086aa5be5c8e4a413192"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "fileName": "./assets/PROVENANCE.md",
+      "SPDXID": "SPDXRef-File-8d7ee2a952a7ca03c400eeff",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "d16eb6375a71b41721f504414def227738ccd1a3"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "ff4ca034865fc00481b48904cdf22436143b93b7de39922323dcae742f39a796"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "fileName": "./assets/patrol.png",
+      "SPDXID": "SPDXRef-File-0745f38542afdda8173d3338",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "13cf6a4340da835684afa299d3193432b187c361"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "15d180c41665862da438daa66aefc29b6a92f944a380db170fc1c642ca561320"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "fileName": "./patrol.json",
+      "SPDXID": "SPDXRef-File-dd6f5a5b3dc3c1a29ec33b98",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "aa15dea3552d3e410be2c845d4a60b908a73c56b"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "877c6283088d7810cf88bd4cf13eee543920c446af46b7c5128310ff2c4b8373"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "fileName": "./tools/csv_writer/Cargo.lock",
+      "SPDXID": "SPDXRef-File-73c62be4b33d10f79c0b5e6f",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "1f7e54cc84ff5d63125a63f8e5a0aff5b65f87be"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "eff17747b8553d08caffb68d3c0f611b8335de6c02f13483678a0ef83bfc90f4"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "fileName": "./tools/csv_writer/Cargo.toml",
+      "SPDXID": "SPDXRef-File-b779cef3c619bca9b143e92a",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "d1df0fad9d39fb596c1893f17a9a303010372854"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "7e814dc434f30b18ba83602fa1b2e69c84d08151222cf6e7d03ca3cb8309aee9"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    },
+    {
+      "fileName": "./tools/csv_writer/src/main.rs",
+      "SPDXID": "SPDXRef-File-33325c9e1b639f6a7bdc2b3a",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "2008bfcf12ece2547292cda3b7e40de7502113bb"
+        },
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "1e870f0841f00c6e48053e4fe7e80e24b1ed8a68d28def407c306fa7a4eab9cc"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseInfoInFiles": [
+        "NOASSERTION"
+      ],
+      "copyrightText": "NOASSERTION"
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-AnimalPatrol"
+    },
+    {
+      "spdxElementId": "SPDXRef-AnimalPatrol",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-bc3c21112696844cd4827a7a"
+    },
+    {
+      "spdxElementId": "SPDXRef-AnimalPatrol",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-54c2ebbff6ebc5defd8253a5"
+    },
+    {
+      "spdxElementId": "SPDXRef-AnimalPatrol",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-c693279643b8cd5d248172d9"
+    },
+    {
+      "spdxElementId": "SPDXRef-AnimalPatrol",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-b335630551682c19a781afeb"
+    },
+    {
+      "spdxElementId": "SPDXRef-AnimalPatrol",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-8d7ee2a952a7ca03c400eeff"
+    },
+    {
+      "spdxElementId": "SPDXRef-AnimalPatrol",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-0745f38542afdda8173d3338"
+    },
+    {
+      "spdxElementId": "SPDXRef-AnimalPatrol",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-dd6f5a5b3dc3c1a29ec33b98"
+    },
+    {
+      "spdxElementId": "SPDXRef-AnimalPatrol",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-73c62be4b33d10f79c0b5e6f"
+    },
+    {
+      "spdxElementId": "SPDXRef-AnimalPatrol",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-b779cef3c619bca9b143e92a"
+    },
+    {
+      "spdxElementId": "SPDXRef-AnimalPatrol",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-File-33325c9e1b639f6a7bdc2b3a"
+    },
+    {
+      "spdxElementId": "SPDXRef-AnimalPatrol",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Crate-csv-writer-0.1.0"
+    },
+    {
+      "spdxElementId": "SPDXRef-Crate-csv-writer-0.1.0",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Crate-serde-json-1.0.151"
+    },
+    {
+      "spdxElementId": "SPDXRef-Crate-proc-macro2-1.0.107",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Crate-unicode-ident-1.0.24"
+    },
+    {
+      "spdxElementId": "SPDXRef-Crate-quote-1.0.47",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Crate-proc-macro2-1.0.107"
+    },
+    {
+      "spdxElementId": "SPDXRef-Crate-serde-1.0.229",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Crate-serde-core-1.0.229"
+    },
+    {
+      "spdxElementId": "SPDXRef-Crate-serde-core-1.0.229",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Crate-serde-derive-1.0.229"
+    },
+    {
+      "spdxElementId": "SPDXRef-Crate-serde-derive-1.0.229",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Crate-proc-macro2-1.0.107"
+    },
+    {
+      "spdxElementId": "SPDXRef-Crate-serde-derive-1.0.229",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Crate-quote-1.0.47"
+    },
+    {
+      "spdxElementId": "SPDXRef-Crate-serde-derive-1.0.229",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Crate-syn-3.0.4"
+    },
+    {
+      "spdxElementId": "SPDXRef-Crate-serde-json-1.0.151",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Crate-itoa-1.0.18"
+    },
+    {
+      "spdxElementId": "SPDXRef-Crate-serde-json-1.0.151",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Crate-memchr-2.8.3"
+    },
+    {
+      "spdxElementId": "SPDXRef-Crate-serde-json-1.0.151",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Crate-serde-1.0.229"
+    },
+    {
+      "spdxElementId": "SPDXRef-Crate-serde-json-1.0.151",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Crate-serde-core-1.0.229"
+    },
+    {
+      "spdxElementId": "SPDXRef-Crate-serde-json-1.0.151",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Crate-zmij-1.0.23"
+    },
+    {
+      "spdxElementId": "SPDXRef-Crate-syn-3.0.4",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Crate-proc-macro2-1.0.107"
+    },
+    {
+      "spdxElementId": "SPDXRef-Crate-syn-3.0.4",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Crate-quote-1.0.47"
+    },
+    {
+      "spdxElementId": "SPDXRef-Crate-syn-3.0.4",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Crate-unicode-ident-1.0.24"
+    }
+  ]
+}
