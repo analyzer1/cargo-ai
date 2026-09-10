@@ -120,12 +120,12 @@ class QualificationPolicyTests(unittest.TestCase):
                 def produce(command, *, env, check):
                     self.assertIn(f"live_{provider}_smoke_uses_isolated_stdin_credentials", command)
                     self.assertEqual(command[-2:], ["--ignored", "--exact"])
-                    Path(env["CARGO_AI_QUALIFICATION_REPORT"]).write_text(record(provider, outcome, **{"probe_id": env["CARGO_AI_QUALIFICATION_PROBE"], **alter}))
+                    Path(env["CARGO_AI_QUALIFICATION_REPORT"]).write_text(record(provider, outcome, **{"probe_id": env["CARGO_AI_QUALIFICATION_PROBE"], **alter}), encoding="utf-8")
                     return SimpleNamespace(returncode=code)
                 with patch.dict(os.environ, environment), patch("qualification_policy.subprocess.check_output", return_value=SHA+"\n"), patch("qualification_policy.subprocess.run", side_effect=produce):
                     if accepted:
                         self.assertEqual(run_probe(provider), 0)
-                        self.assertEqual(parse_record(output.read_text().removeprefix("evidence=").strip())["outcome"], outcome)
+                        self.assertEqual(parse_record(output.read_text(encoding="utf-8").removeprefix("evidence=").strip())["outcome"], outcome)
                     else:
                         with self.assertRaises(EvidenceError):
                             run_probe(provider)
@@ -139,7 +139,7 @@ class QualificationDashboardTests(unittest.TestCase):
         import sys
         import textwrap
         repository = Path(__file__).resolve().parents[2]
-        workflow = (repository/".github/workflows/release-qualification.yml").read_text()
+        workflow = (repository/".github/workflows/release-qualification.yml").read_text(encoding="utf-8")
         source = textwrap.dedent(workflow.split("          python3 - <<'PY'\n", 1)[1].rsplit("          PY", 1)[0])
         names = [f"{family} ({platform}-latest)" for family in ["Deterministic qualification", "Source package qualification"] for platform in ["ubuntu", "macos", "windows"]]
         labels = {"openai": "OpenAI", "anthropic": "Anthropic", "gemini": "Gemini", "xai": "xAI", "mistral": "Mistral"}
@@ -155,12 +155,12 @@ class QualificationDashboardTests(unittest.TestCase):
             (checkout/"scripts").mkdir(parents=True)
             shutil.copy2(repository/".github/scripts/qualification_policy.py", checkout/"scripts/qualification_policy.py")
             shutil.copy2(repository/".github/package-qualification-catalog.toml", checkout/"package-qualification-catalog.toml")
-            jobs_path = root/"jobs.json"; jobs_path.write_text(json.dumps({"jobs": jobs}))
+            jobs_path = root/"jobs.json"; jobs_path.write_text(json.dumps({"jobs": jobs}), encoding="utf-8")
             summary = root/"summary.md"
             env = dict(os.environ, GITHUB_REPOSITORY="example/project", GITHUB_RUN_ID="123", GITHUB_RUN_NUMBER="1", GITHUB_RUN_ATTEMPT="2", CARGO_AI_SHA=SHA, TRUSTED_TRIGGER_SHA=SHA, JOBS_API_STATUS="0", JOBS_JSON=str(jobs_path), CATALOG_CHECKOUT_OUTCOME="success", CATALOG_PATH=str(checkout/"package-qualification-catalog.toml"), GITHUB_STEP_SUMMARY=str(summary), PROVIDER_PROBE_RECORDS=json.dumps(needs), DETERMINISTIC_RESULT="success", PACKAGE_RESULT="success", LIVE_GEMINI_ENABLED="true", LIVE_XAI_ENABLED="true", LIVE_MISTRAL_ENABLED="true")
             env.update(extra)
-            result = subprocess.run([sys.executable, "-c", source], cwd=root, env=env, capture_output=True, text=True, timeout=15)
-            return result.returncode, summary.read_text() if summary.exists() else "", result.stderr
+            result = subprocess.run([sys.executable, "-c", source], cwd=root, env=env, capture_output=True, text=True, encoding="utf-8", timeout=15)
+            return result.returncode, summary.read_text(encoding="utf-8") if summary.exists() else "", result.stderr
 
     def test_actual_dashboard_passes_with_collapsed_supplemental_rate_warning(self):
         code, summary, error = self.run_dashboard()

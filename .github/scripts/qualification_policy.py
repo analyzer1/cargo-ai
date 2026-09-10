@@ -116,7 +116,7 @@ def run_probe(provider):
     if provider not in PROVIDERS:
         raise EvidenceError("unknown provider")
     candidate = os.environ["CARGO_AI_SHA"]
-    if subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() != candidate:
+    if subprocess.check_output(["git", "rev-parse", "HEAD"], text=True, encoding="utf-8").strip() != candidate:
         raise EvidenceError("checkout does not match exact candidate")
     # A fresh private directory prevents reuse of previous attempts or evidence.
     with tempfile.TemporaryDirectory(prefix="provider-qualification-", dir=os.environ["RUNNER_TEMP"]) as directory:
