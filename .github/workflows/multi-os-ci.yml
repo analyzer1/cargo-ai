@@ -87,6 +87,9 @@ jobs:
             echo "RUST_TEST_THREADS=1"
           } >> "$GITHUB_ENV"
 
+      - name: Check qualification policy
+        run: python3 -m unittest discover -s .github/scripts -p 'test_qualification_policy.py'
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -100,16 +103,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for test_name in \
-            generated_anthropic_smoke_isolated_and_deterministic \
-            generated_gemini_smoke_isolated_and_deterministic \
-            generated_mistral_smoke_isolated_and_deterministic \
-            generated_xai_smoke_isolated_and_deterministic \
-            generated_openai_smoke_isolated_and_deterministic \
-            generated_ollama_smoke_isolated_and_deterministic
-          do
-            cargo test --locked --test provider_smoke "$test_name" -- --ignored --exact
-          done
+          cargo test --locked --test provider_smoke generated_provider_batch_isolated_and_deterministic -- --ignored --exact --nocapture
 
       - name: Build candidate CLI
         run: cargo build --locked

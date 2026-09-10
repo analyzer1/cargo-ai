@@ -1,5 +1,10 @@
 //! Reusable process-level provider smoke coverage.
 
+#[path = "support/provider_cache.rs"]
+mod provider_cache;
+#[path = "support/qualification_report.rs"]
+mod qualification_report;
+
 use serde_json::Value;
 use std::fs;
 use std::io::{Read, Write};
@@ -573,6 +578,16 @@ fn run_generated_hosted_smoke(
         .arg("--force")
         .output()
         .expect("hosted provider hatch should start");
+    if fixture.home.join("batch-seed-marker").exists() {
+        assert!(
+            String::from_utf8_lossy(&hatch.stdout).contains("Reused warmed template"),
+            "batch case should reuse its copied seed"
+        );
+        eprintln!(
+            "generated-provider hatch: {}",
+            String::from_utf8_lossy(&hatch.stderr)
+        );
+    }
     assert!(
         hatch.status.success(),
         "{provider} hatch failed\n{}\n{}",
@@ -714,6 +729,16 @@ fn run_generated_openai_compatible_smoke(
         .arg("--force")
         .output()
         .expect("OpenAI-compatible hatch should start");
+    if fixture.home.join("batch-seed-marker").exists() {
+        assert!(
+            String::from_utf8_lossy(&hatch.stdout).contains("Reused warmed template"),
+            "batch case should reuse its copied seed"
+        );
+        eprintln!(
+            "generated-provider hatch: {}",
+            String::from_utf8_lossy(&hatch.stderr)
+        );
+    }
     assert!(
         hatch.status.success(),
         "{provider} hatch failed\n{}\n{}",
@@ -753,7 +778,10 @@ fn interpreted_anthropic_smoke_isolated_and_deterministic() {
 #[test]
 #[ignore = "run explicitly in the provider smoke CI lane"]
 fn generated_anthropic_smoke_isolated_and_deterministic() {
-    let fixture = Fixture::new();
+    generated_anthropic_case(&Fixture::new());
+}
+
+fn generated_anthropic_case(fixture: &Fixture) {
     let output_dir = fixture.root.join("dist");
     let hatch = fixture
         .isolated_command(env!("CARGO_BIN_EXE_cargo-ai"))
@@ -769,6 +797,16 @@ fn generated_anthropic_smoke_isolated_and_deterministic() {
         .arg("--force")
         .output()
         .expect("hatch should start");
+    if fixture.home.join("batch-seed-marker").exists() {
+        assert!(
+            String::from_utf8_lossy(&hatch.stdout).contains("Reused warmed template"),
+            "batch case should reuse its copied seed"
+        );
+        eprintln!(
+            "generated-provider hatch: {}",
+            String::from_utf8_lossy(&hatch.stderr)
+        );
+    }
     assert!(
         hatch.status.success(),
         "hatch failed\n{}\n{}",
@@ -810,7 +848,10 @@ fn interpreted_gemini_smoke_isolated_and_deterministic() {
 #[test]
 #[ignore = "run explicitly in the provider smoke CI lane"]
 fn generated_gemini_smoke_isolated_and_deterministic() {
-    let fixture = Fixture::new();
+    generated_gemini_case(&Fixture::new());
+}
+
+fn generated_gemini_case(fixture: &Fixture) {
     let output_dir = fixture.root.join("dist");
     let hatch = fixture
         .isolated_command(env!("CARGO_BIN_EXE_cargo-ai"))
@@ -826,6 +867,16 @@ fn generated_gemini_smoke_isolated_and_deterministic() {
         .arg("--force")
         .output()
         .expect("hatch should start");
+    if fixture.home.join("batch-seed-marker").exists() {
+        assert!(
+            String::from_utf8_lossy(&hatch.stdout).contains("Reused warmed template"),
+            "batch case should reuse its copied seed"
+        );
+        eprintln!(
+            "generated-provider hatch: {}",
+            String::from_utf8_lossy(&hatch.stderr)
+        );
+    }
     assert!(
         hatch.status.success(),
         "Gemini hatch failed\n{}\n{}",
@@ -863,7 +914,10 @@ fn interpreted_mistral_smoke_isolated_and_deterministic() {
 #[test]
 #[ignore = "run explicitly in the provider smoke CI lane"]
 fn generated_mistral_smoke_isolated_and_deterministic() {
-    let fixture = Fixture::new();
+    generated_mistral_case(&Fixture::new());
+}
+
+fn generated_mistral_case(fixture: &Fixture) {
     run_generated_hosted_smoke(
         &fixture,
         "mistral_provider_smoke",
@@ -889,7 +943,10 @@ fn interpreted_xai_smoke_isolated_and_deterministic() {
 #[test]
 #[ignore = "run explicitly in the provider smoke CI lane"]
 fn generated_xai_smoke_isolated_and_deterministic() {
-    let fixture = Fixture::new();
+    generated_xai_case(&Fixture::new());
+}
+
+fn generated_xai_case(fixture: &Fixture) {
     run_generated_hosted_smoke(
         &fixture,
         "xai_provider_smoke",
@@ -915,7 +972,10 @@ fn interpreted_openai_smoke_isolated_and_deterministic() {
 #[test]
 #[ignore = "run explicitly in the provider smoke CI lane"]
 fn generated_openai_smoke_isolated_and_deterministic() {
-    let fixture = Fixture::new();
+    generated_openai_case(&Fixture::new());
+}
+
+fn generated_openai_case(fixture: &Fixture) {
     run_generated_openai_compatible_smoke(
         &fixture,
         "openai_provider_smoke",
@@ -941,7 +1001,10 @@ fn interpreted_ollama_smoke_isolated_and_deterministic() {
 #[test]
 #[ignore = "run explicitly in the provider smoke CI lane"]
 fn generated_ollama_smoke_isolated_and_deterministic() {
-    let fixture = Fixture::new();
+    generated_ollama_case(&Fixture::new());
+}
+
+fn generated_ollama_case(fixture: &Fixture) {
     run_generated_openai_compatible_smoke(
         &fixture,
         "ollama_provider_smoke",
@@ -949,6 +1012,84 @@ fn generated_ollama_smoke_isolated_and_deterministic() {
         "ollama-smoke",
         None,
         MockServer::ollama_success(),
+    );
+}
+
+#[test]
+#[ignore = "run explicitly in the provider smoke CI lane"]
+fn generated_provider_batch_isolated_and_deterministic() {
+    let seed = Fixture::new();
+    let identity =
+        provider_cache::CacheIdentity::current(Path::new(env!("CARGO_BIN_EXE_cargo-ai")));
+    let started = Instant::now();
+    let hatch = seed
+        .isolated_command(env!("CARGO_BIN_EXE_cargo-ai"))
+        .args([
+            "--no-update-check",
+            "hatch",
+            "neutral_provider_seed",
+            "--config",
+        ])
+        .arg(&seed.definition)
+        .arg("--output-dir")
+        .arg(seed.root.join("dist"))
+        .arg("--force")
+        .output()
+        .unwrap();
+    assert!(
+        hatch.status.success(),
+        "neutral seed failed: {}\n{}",
+        String::from_utf8_lossy(&hatch.stdout),
+        String::from_utf8_lossy(&hatch.stderr)
+    );
+    let cache = provider_cache::SeedCache::capture(&seed.home, identity.clone()).unwrap();
+    eprintln!(
+        "generated-provider neutral-seed: {:.2}s",
+        started.elapsed().as_secs_f64()
+    );
+    let cases: [(&str, fn(&Fixture)); 6] = [
+        ("anthropic", generated_anthropic_case),
+        ("gemini", generated_gemini_case),
+        ("mistral", generated_mistral_case),
+        ("xai", generated_xai_case),
+        ("openai", generated_openai_case),
+        ("ollama", generated_ollama_case),
+    ];
+    let mut completed = Vec::new();
+    for (provider, case) in cases {
+        let fixture = Fixture::new();
+        let copied = Instant::now();
+        cache.copy_into(&fixture.home, &identity).unwrap();
+        eprintln!(
+            "generated-provider {provider} copy: {:.2}s",
+            copied.elapsed().as_secs_f64()
+        );
+        fs::write(fixture.home.join("batch-seed-marker"), "neutral").unwrap();
+        let mut definition: Value = serde_json::from_str(definition_json()).unwrap();
+        definition["inputs"][0]["text"] =
+            Value::String(format!("Return a short status. provider_case_{provider}"));
+        fs::write(
+            &fixture.definition,
+            serde_json::to_vec(&definition).unwrap(),
+        )
+        .unwrap();
+        let execution = Instant::now();
+        case(&fixture);
+        fs::write(fixture.home.join("provider-case-output"), provider).unwrap();
+        cache.unchanged().unwrap();
+        completed.push(provider);
+        eprintln!(
+            "generated-provider {provider}: passed, assembly/execution {:.2}s",
+            execution.elapsed().as_secs_f64()
+        );
+    }
+    assert_eq!(
+        completed,
+        ["anthropic", "gemini", "mistral", "xai", "openai", "ollama"]
+    );
+    eprintln!(
+        "generated-provider batch: 6/6 passed in {:.2}s",
+        started.elapsed().as_secs_f64()
     );
 }
 
@@ -1473,151 +1614,60 @@ fn anthropic_timeout_and_file_failures_are_actionable() {
 #[test]
 #[ignore = "requires ANTHROPIC_API_KEY and ANTHROPIC_MODEL"]
 fn live_anthropic_smoke_uses_isolated_stdin_credentials() {
-    let api_key = std::env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY is required");
-    let model = std::env::var("ANTHROPIC_MODEL").expect("ANTHROPIC_MODEL is required");
-    let fixture = Fixture::new();
-    let cli = env!("CARGO_BIN_EXE_cargo-ai");
-    let add = fixture
-        .isolated_command(cli)
-        .args([
-            "--no-update-check",
-            "profile",
-            "add",
-            "anthropic-live",
-            "--server",
-            "anthropic",
-            "--model",
-            &model,
-            "--auth",
-            "api_key",
-            "--max-output-tokens",
-            "128",
-        ])
-        .output()
-        .expect("profile add should start");
-    assert!(add.status.success(), "profile add should succeed");
-
-    let mut set = fixture.isolated_command(cli);
-    let mut child = set
-        .args([
-            "--no-update-check",
-            "profile",
-            "set",
-            "anthropic-live",
-            "--stdin",
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("profile set should start");
-    child
-        .stdin
-        .take()
-        .expect("profile set stdin should exist")
-        .write_all(api_key.as_bytes())
-        .expect("API key should be written to isolated profile stdin");
-    let set_output = child.wait_with_output().expect("profile set should finish");
-    assert!(
-        set_output.status.success(),
-        "profile token setup should succeed"
-    );
-
-    let run = fixture
-        .isolated_command(cli)
-        .args(["--no-update-check", "run", "--config"])
-        .arg(&fixture.definition)
-        .args(["--profile", "anthropic-live", "--usage-log"])
-        .arg(&fixture.usage)
-        .output()
-        .expect("live Anthropic smoke should start");
-    assert!(
-        run.status.success(),
-        "live Anthropic smoke failed\n{}\n{}",
-        String::from_utf8_lossy(&run.stdout),
-        String::from_utf8_lossy(&run.stderr)
-    );
-    let events = fs::read_to_string(&fixture.usage).expect("usage log should exist");
-    assert!(events.contains("\"server\":\"anthropic\""));
-    assert!(!events.contains(&api_key));
+    run_live_hosted_smoke("anthropic", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL");
 }
 
 #[test]
 #[ignore = "requires GEMINI_API_KEY and GEMINI_MODEL"]
 fn live_gemini_smoke_uses_isolated_stdin_credentials() {
-    let api_key = std::env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY is required");
-    let model = std::env::var("GEMINI_MODEL").expect("GEMINI_MODEL is required");
-    let fixture = Fixture::new();
-    let cli = env!("CARGO_BIN_EXE_cargo-ai");
-    let add = fixture
-        .isolated_command(cli)
-        .args([
-            "--no-update-check",
-            "profile",
-            "add",
-            "gemini-live",
-            "--server",
-            "gemini",
-            "--model",
-            &model,
-            "--auth",
-            "api_key",
-            "--max-output-tokens",
-            "128",
-        ])
-        .output()
-        .expect("Gemini profile add should start");
-    assert!(add.status.success(), "Gemini profile add should succeed");
-
-    let mut set = fixture.isolated_command(cli);
-    let mut child = set
-        .args([
-            "--no-update-check",
-            "profile",
-            "set",
-            "gemini-live",
-            "--stdin",
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("Gemini profile set should start");
-    child
-        .stdin
-        .take()
-        .expect("profile set stdin should exist")
-        .write_all(api_key.as_bytes())
-        .expect("Gemini API key should be written to isolated profile stdin");
-    let set_output = child.wait_with_output().expect("profile set should finish");
-    assert!(
-        set_output.status.success(),
-        "Gemini token setup should succeed"
-    );
-
-    let run = fixture
-        .isolated_command(cli)
-        .args(["--no-update-check", "run", "--config"])
-        .arg(&fixture.definition)
-        .args(["--profile", "gemini-live", "--usage-log"])
-        .arg(&fixture.usage)
-        .output()
-        .expect("live Gemini smoke should start");
-    assert!(
-        run.status.success(),
-        "live Gemini smoke failed\n{}\n{}",
-        String::from_utf8_lossy(&run.stdout),
-        String::from_utf8_lossy(&run.stderr)
-    );
-    let events = fs::read_to_string(&fixture.usage).expect("usage log should exist");
-    assert!(events.contains("\"server\":\"gemini\""));
-    assert!(!events.contains(&api_key));
+    run_live_hosted_smoke("gemini", "GEMINI_API_KEY", "GEMINI_MODEL");
 }
 
 fn run_live_hosted_smoke(provider: &str, key_env: &str, model_env: &str) {
     let api_key = std::env::var(key_env).unwrap_or_else(|_| panic!("{key_env} is required"));
     let model = std::env::var(model_env).unwrap_or_else(|_| panic!("{model_env} is required"));
+    let report =
+        qualification_report::Context::from_environment().expect("valid qualification mode");
     let fixture = Fixture::new();
+    let run = run_profile_probe(&fixture, provider, &model, &api_key, None);
+    if let Some(report) = report {
+        report
+            .write(
+                provider,
+                &model,
+                &format!("{provider}-api"),
+                &api_key,
+                run.status.code(),
+                &fixture.usage,
+            )
+            .expect("complete sanitized qualification report");
+    } else {
+        strict_live_probe(&run).expect("live provider smoke failed");
+        let events = fs::read_to_string(&fixture.usage).expect("usage log should exist");
+        assert!(events.contains(&format!("\"server\":\"{provider}\"")));
+        assert!(!events.contains(&api_key));
+    }
+}
+
+fn strict_live_probe(run: &Output) -> Result<(), &'static str> {
+    if run.status.success() {
+        Ok(())
+    } else {
+        Err("live provider smoke failed")
+    }
+}
+
+fn run_profile_probe(
+    fixture: &Fixture,
+    provider: &str,
+    model: &str,
+    api_key: &str,
+    url: Option<&str>,
+) -> Output {
+    assert!(
+        !api_key.is_empty() && !model.trim().is_empty(),
+        "probe credentials/model must be configured"
+    );
     let cli = env!("CARGO_BIN_EXE_cargo-ai");
     let profile = format!("{provider}-api");
     let add = fixture
@@ -1663,23 +1713,19 @@ fn run_live_hosted_smoke(provider: &str, key_env: &str, model_env: &str) {
         "{provider} token setup should succeed"
     );
 
-    let run = fixture
-        .isolated_command(cli)
+    let mut command = fixture.isolated_command(cli);
+    command
+        .env_remove("CARGO_AI_USAGE_ROOT_RUN_ID")
+        .env_remove("CARGO_AI_USAGE_PARENT_AGENT_RUN_ID");
+    command
         .args(["--no-update-check", "run", "--config"])
         .arg(&fixture.definition)
         .args(["--profile", &profile, "--usage-log"])
-        .arg(&fixture.usage)
-        .output()
-        .expect("live hosted smoke should start");
-    assert!(
-        run.status.success(),
-        "live {provider} smoke failed\n{}\n{}",
-        String::from_utf8_lossy(&run.stdout),
-        String::from_utf8_lossy(&run.stderr)
-    );
-    let events = fs::read_to_string(&fixture.usage).expect("usage log should exist");
-    assert!(events.contains(&format!("\"server\":\"{provider}\"")));
-    assert!(!events.contains(&api_key));
+        .arg(&fixture.usage);
+    if let Some(url) = url {
+        command.args(["--url", url]);
+    }
+    command.output().expect("profile probe should start")
 }
 
 #[test]
@@ -1698,4 +1744,145 @@ fn live_xai_smoke_uses_isolated_stdin_credentials() {
 #[ignore = "requires OPENAI_API_KEY and OPENAI_MODEL"]
 fn live_openai_smoke_uses_isolated_stdin_credentials() {
     run_live_hosted_smoke("openai", "OPENAI_API_KEY", "OPENAI_MODEL");
+}
+
+#[test]
+fn qualification_reports_validate_real_probes_and_keep_strict_diagnostics() {
+    let successes: [(&str, fn() -> MockServer); 5] = [
+        ("anthropic", MockServer::success),
+        ("gemini", MockServer::gemini_success),
+        ("mistral", MockServer::mistral_success),
+        ("xai", MockServer::xai_success),
+        ("openai", MockServer::openai_success),
+    ];
+    for (provider, server) in successes {
+        qualification_probe_case(provider, server(), "pass");
+    }
+    for (status, expected) in [
+        (429, "rate_limited"),
+        (401, "failure"),
+        (400, "failure"),
+        (500, "failure"),
+    ] {
+        qualification_probe_case(
+            "mistral",
+            MockServer::respond_after_at(
+                "/v1/chat/completions",
+                Duration::ZERO,
+                status,
+                r#"{"message":"private-response-sentinel"}"#.into(),
+            ),
+            expected,
+        );
+    }
+    qualification_probe_case(
+        "mistral",
+        MockServer::respond_after_at(
+            "/v1/chat/completions",
+            Duration::ZERO,
+            200,
+            mistral_success_response(r#"{"status":false}"#),
+        ),
+        "failure",
+    );
+}
+
+fn qualification_probe_case(provider: &str, mock: MockServer, expected: &str) {
+    let fixture = Fixture::new();
+    let model = "qualification-mock-model";
+    let token = "qualification-fake-secret-sentinel";
+    let output = run_profile_probe(&fixture, provider, model, token, Some(&mock.url));
+    let request = mock.finish();
+    assert!(request.contains(model));
+    assert!(request.contains(token));
+    let report = qualification_report::Context {
+        path: fixture.root.join("report.json"),
+        candidate: "a".repeat(40),
+        run_id: "123".into(),
+        run_attempt: "2".into(),
+        probe_id: "b".repeat(32),
+    };
+    assert_eq!(
+        report
+            .write(
+                provider,
+                model,
+                &format!("{provider}-api"),
+                token,
+                output.status.code(),
+                &fixture.usage
+            )
+            .unwrap(),
+        expected
+    );
+    let saved = fs::read(&report.path).unwrap();
+    for forbidden in [token, model, "private-response-sentinel", "cps-"] {
+        assert!(!String::from_utf8_lossy(&saved).contains(forbidden));
+    }
+    assert!(report
+        .write(
+            provider,
+            model,
+            &format!("{provider}-api"),
+            token,
+            output.status.code(),
+            &fixture.usage
+        )
+        .is_err());
+    assert_eq!(fs::read(&report.path).unwrap(), saved);
+    if expected == "pass" {
+        assert!(strict_live_probe(&output).is_ok());
+    } else {
+        assert!(strict_live_probe(&output).is_err());
+    }
+    // Exercise the actual producer/consumer boundary without a real workflow or service.
+    let policy = Command::new("python3").arg("-c").arg(
+        "import json,sys; sys.path.insert(0,sys.argv[1]); from qualification_policy import evaluate; from pathlib import Path; raw=Path(sys.argv[2]).read_text(); r=json.loads(raw); d=evaluate(r['provider'],raw,candidate='a'*40,run_id='123',run_attempt='2',probe_id='b'*32); print(str(d['accepted']).lower())"
+    ).arg(Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/scripts")).arg(&report.path).output().unwrap();
+    assert!(policy.status.success());
+    assert_eq!(
+        String::from_utf8(policy.stdout).unwrap().trim(),
+        if expected == "pass" || expected == "rate_limited" {
+            "true"
+        } else {
+            "false"
+        }
+    );
+
+    if expected == "pass" && provider == "mistral" {
+        let raw = fs::read_to_string(&fixture.usage).unwrap();
+        let events: Vec<Value> = raw
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let serialize = |items: &[Value]| {
+            items
+                .iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let classify = |value: &str, code| {
+            qualification_report::classify(value, provider, model, &format!("{provider}-api"), code)
+        };
+        assert!(classify(&raw, None).is_err());
+        assert!(classify(&raw, Some(2)).is_err());
+        assert!(classify(&raw, Some(1)).is_err());
+        assert!(classify(&serialize(&events[..4]), Some(0)).is_err());
+        assert!(classify(&(raw.clone() + &raw), Some(0)).is_err());
+        assert!(classify("invalid", Some(0)).is_err());
+        for (index, field, value) in [
+            (2, "root_run_id", Value::String("stale".into())),
+            (2, "agent_run_id", Value::String("stale".into())),
+            (2, "status", Value::String("failed".into())),
+            (4, "status", Value::String("failed".into())),
+        ] {
+            let mut changed = events.clone();
+            changed[index][field] = value;
+            assert!(classify(&serialize(&changed), Some(0)).is_err());
+        }
+        let mut changed = events.clone();
+        changed[2]["provider"]["server"] = Value::String("xai".into());
+        assert!(classify(&serialize(&changed), Some(0)).is_err());
+    }
 }

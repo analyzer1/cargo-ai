@@ -58,6 +58,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: live-provider-ci
     timeout-minutes: 15
+    outputs:
+      evidence: ${{ steps.probe.outputs.evidence }}
     steps:
       - name: Validate exact trusted Cargo AI candidate
         shell: bash
@@ -82,29 +84,25 @@ jobs:
         shell: bash
         run: echo "CARGO_AI_HOME=$RUNNER_TEMP/cargo-ai-home" >> "$GITHUB_ENV"
       - name: Run one representative OpenAI check
+        id: probe
         env:
+          CARGO_AI_SHA: ${{ inputs.cargo_ai_sha || github.sha }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL: ${{ inputs.openai_model || vars.OPENAI_MODEL }}
         run: |
           set -euo pipefail
           [[ -n "${OPENAI_API_KEY:-}" ]] || { echo "OPENAI_API_KEY is required" >&2; exit 1; }
           [[ -n "${OPENAI_MODEL:-}" ]] || { echo "OPENAI_MODEL is required" >&2; exit 1; }
-          cargo test --locked --test provider_smoke live_openai_smoke_uses_isolated_stdin_credentials -- --ignored --exact
+          python3 .github/scripts/qualification_policy.py openai
 
   live_anthropic:
     name: Live Anthropic conformance
-    if: ${{ vars.LIVE_ANTHROPIC_ENABLED != '' && vars.LIVE_ANTHROPIC_ENABLED != 'false' }}
     runs-on: ubuntu-latest
     environment: live-provider-ci
     timeout-minutes: 15
+    outputs:
+      evidence: ${{ steps.probe.outputs.evidence }}
     steps:
-      - name: Validate Anthropic enrollment
-        shell: bash
-        env:
-          PROVIDER_ENABLED: ${{ vars.LIVE_ANTHROPIC_ENABLED }}
-        run: |
-          set -euo pipefail
-          [[ "$PROVIDER_ENABLED" == "true" ]] || { echo "LIVE_ANTHROPIC_ENABLED must equal true" >&2; exit 1; }
       - name: Validate exact trusted Cargo AI candidate
         shell: bash
         env:
@@ -128,14 +126,16 @@ jobs:
         shell: bash
         run: echo "CARGO_AI_HOME=$RUNNER_TEMP/cargo-ai-home" >> "$GITHUB_ENV"
       - name: Run one representative Anthropic check
+        id: probe
         env:
+          CARGO_AI_SHA: ${{ inputs.cargo_ai_sha || github.sha }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_MODEL: ${{ inputs.anthropic_model || vars.ANTHROPIC_MODEL }}
         run: |
           set -euo pipefail
-          [[ -n "${ANTHROPIC_API_KEY:-}" ]] || { echo "ANTHROPIC_API_KEY is required for enrolled Anthropic" >&2; exit 1; }
-          [[ -n "${ANTHROPIC_MODEL:-}" ]] || { echo "ANTHROPIC_MODEL is required for enrolled Anthropic" >&2; exit 1; }
-          cargo test --locked --test provider_smoke live_anthropic_smoke_uses_isolated_stdin_credentials -- --ignored --exact
+          [[ -n "${ANTHROPIC_API_KEY:-}" ]] || { echo "ANTHROPIC_API_KEY is required" >&2; exit 1; }
+          [[ -n "${ANTHROPIC_MODEL:-}" ]] || { echo "ANTHROPIC_MODEL is required" >&2; exit 1; }
+          python3 .github/scripts/qualification_policy.py anthropic
 
   live_gemini:
     name: Live Gemini conformance
@@ -143,6 +143,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: live-provider-ci
     timeout-minutes: 15
+    outputs:
+      evidence: ${{ steps.probe.outputs.evidence }}
     steps:
       - name: Validate Gemini enrollment
         shell: bash
@@ -174,14 +176,16 @@ jobs:
         shell: bash
         run: echo "CARGO_AI_HOME=$RUNNER_TEMP/cargo-ai-home" >> "$GITHUB_ENV"
       - name: Run one representative Gemini check
+        id: probe
         env:
+          CARGO_AI_SHA: ${{ inputs.cargo_ai_sha || github.sha }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ inputs.gemini_model || vars.GEMINI_MODEL }}
         run: |
           set -euo pipefail
           [[ -n "${GEMINI_API_KEY:-}" ]] || { echo "GEMINI_API_KEY is required for enrolled Gemini" >&2; exit 1; }
           [[ -n "${GEMINI_MODEL:-}" ]] || { echo "GEMINI_MODEL is required for enrolled Gemini" >&2; exit 1; }
-          cargo test --locked --test provider_smoke live_gemini_smoke_uses_isolated_stdin_credentials -- --ignored --exact
+          python3 .github/scripts/qualification_policy.py gemini
 
   live_xai:
     name: Live xAI conformance
@@ -189,6 +193,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: live-provider-ci
     timeout-minutes: 15
+    outputs:
+      evidence: ${{ steps.probe.outputs.evidence }}
     steps:
       - name: Validate xAI enrollment
         shell: bash
@@ -220,14 +226,16 @@ jobs:
         shell: bash
         run: echo "CARGO_AI_HOME=$RUNNER_TEMP/cargo-ai-home" >> "$GITHUB_ENV"
       - name: Run one representative xAI check
+        id: probe
         env:
+          CARGO_AI_SHA: ${{ inputs.cargo_ai_sha || github.sha }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           XAI_MODEL: ${{ inputs.xai_model || vars.XAI_MODEL }}
         run: |
           set -euo pipefail
           [[ -n "${XAI_API_KEY:-}" ]] || { echo "XAI_API_KEY is required for enrolled xAI" >&2; exit 1; }
           [[ -n "${XAI_MODEL:-}" ]] || { echo "XAI_MODEL is required for enrolled xAI" >&2; exit 1; }
-          cargo test --locked --test provider_smoke live_xai_smoke_uses_isolated_stdin_credentials -- --ignored --exact
+          python3 .github/scripts/qualification_policy.py xai
 
   live_mistral:
     name: Live Mistral conformance
@@ -235,6 +243,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: live-provider-ci
     timeout-minutes: 15
+    outputs:
+      evidence: ${{ steps.probe.outputs.evidence }}
     steps:
       - name: Validate Mistral enrollment
         shell: bash
@@ -266,14 +276,16 @@ jobs:
         shell: bash
         run: echo "CARGO_AI_HOME=$RUNNER_TEMP/cargo-ai-home" >> "$GITHUB_ENV"
       - name: Run one representative Mistral check
+        id: probe
         env:
+          CARGO_AI_SHA: ${{ inputs.cargo_ai_sha || github.sha }}
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           MISTRAL_MODEL: ${{ inputs.mistral_model || vars.MISTRAL_MODEL }}
         run: |
           set -euo pipefail
           [[ -n "${MISTRAL_API_KEY:-}" ]] || { echo "MISTRAL_API_KEY is required for enrolled Mistral" >&2; exit 1; }
           [[ -n "${MISTRAL_MODEL:-}" ]] || { echo "MISTRAL_MODEL is required for enrolled Mistral" >&2; exit 1; }
-          cargo test --locked --test provider_smoke live_mistral_smoke_uses_isolated_stdin_credentials -- --ignored --exact
+          python3 .github/scripts/qualification_policy.py mistral
 
   summary:
     name: Product qualification summary
@@ -297,13 +309,13 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          PROVIDER_PROBE_RECORDS: ${{ toJSON(needs) }}
           DETERMINISTIC_RESULT: ${{ needs.deterministic.result }}
           PACKAGE_RESULT: ${{ needs.packages.result }}
           CARGO_AI_SHA: ${{ inputs.cargo_ai_sha || github.sha }}
           TRUSTED_TRIGGER_SHA: ${{ github.sha }}
           CATALOG_CHECKOUT_OUTCOME: ${{ steps.candidate_metadata.outcome }}
           CATALOG_PATH: qualification-dashboard-source/.github/package-qualification-catalog.toml
-          LIVE_ANTHROPIC_ENABLED: ${{ vars.LIVE_ANTHROPIC_ENABLED }}
           LIVE_GEMINI_ENABLED: ${{ vars.LIVE_GEMINI_ENABLED }}
           LIVE_XAI_ENABLED: ${{ vars.LIVE_XAI_ENABLED }}
           LIVE_MISTRAL_ENABLED: ${{ vars.LIVE_MISTRAL_ENABLED }}
@@ -361,6 +373,9 @@ jobs:
           import tomllib
           from pathlib import Path
 
+          sys.path.insert(0, str(Path("qualification-dashboard-source/.github/scripts").resolve()))
+          from qualification_policy import EvidenceError, summary_providers
+
           SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
           REPOSITORY_PATTERN = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
           FAILING_CONCLUSIONS = {
@@ -378,10 +393,10 @@ jobs:
               "skipped": "⏭️ skipped",
               "not_configured": "⚪ not configured",
               "missing": "❓ missing",
+              "unverified": "⚠️ not verified — rate limited",
           }
 
           OPTIONAL_PROVIDER_FLAGS = {
-              "Anthropic": "LIVE_ANTHROPIC_ENABLED",
               "Gemini": "LIVE_GEMINI_ENABLED",
               "xAI": "LIVE_XAI_ENABLED",
               "Mistral": "LIVE_MISTRAL_ENABLED",
@@ -393,14 +408,6 @@ jobs:
           def trusted_job_url(value):
               prefix = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}/job/"
               return value if isinstance(value, str) and value.startswith(prefix) else run_url
-
-          def optional_provider_enrollment(provider):
-              value = os.environ.get(OPTIONAL_PROVIDER_FLAGS[provider], "").strip()
-              if value == "true":
-                  return True
-              if value in {"", "false"}:
-                  return False
-              return None
 
           def aggregate_jobs(expected):
               selected = []
@@ -458,7 +465,7 @@ jobs:
               evidence = " · ".join(
                   f"[{label}]({trusted_job_url(job.get('html_url'))})" for label, job in selected
               )
-              return {"status": status, "completed": completed, "evidence": evidence}
+              return {"status": status, "completed": completed, "evidence": evidence, "run_attempt": max(job["run_attempt"] for _, job in selected)}
 
           def read_catalog():
               if os.environ.get("CATALOG_CHECKOUT_OUTCOME") != "success":
@@ -536,29 +543,34 @@ jobs:
           }
           provider_rows = []
           provider_configuration_ok = True
+          provider_results_ok = False
+          try:
+              needs_records = json.loads(os.environ["PROVIDER_PROBE_RECORDS"])
+              records = {provider.lower(): needs_records[f"live_{provider.lower()}"]["outputs"].get("evidence", "") for provider in provider_jobs}
+              for provider, result in provider_jobs.items():
+                  flag = OPTIONAL_PROVIDER_FLAGS.get(provider)
+                  if flag and os.environ.get(flag, "") in {"", "false"} and result["status"] == "missing" and needs_records[f"live_{provider.lower()}"]["result"] == "skipped":
+                      result["status"] = "skipped"
+                  expected_result = {"pass": "success", "fail": "failure"}.get(result["status"], result["status"])
+                  if needs_records[f"live_{provider.lower()}"]["result"] != expected_result:
+                      raise EvidenceError("job API and dependency result disagree")
+              outcomes = summary_providers(
+                  records,
+                  {provider.lower(): "success" if result["status"] == "pass" else result["status"] for provider, result in provider_jobs.items()},
+                  {provider.lower(): os.environ.get(flag, "") for provider, flag in OPTIONAL_PROVIDER_FLAGS.items()},
+                  candidate=candidate, run_id=os.environ["GITHUB_RUN_ID"], run_attempt=str(current_attempt),
+                  job_attempts={provider.lower(): str(result.get("run_attempt", current_attempt)) for provider, result in provider_jobs.items()},
+              )
+              provider_results_ok = all(result["accepted"] for result in outcomes.values())
+          except (EvidenceError, ValueError, KeyError, TypeError):
+              provider_configuration_ok = False
+              outcomes = {}
           for provider, result in provider_jobs.items():
-              if provider == "OpenAI":
-                  policy = "required"
-                  scope = "Required protected representative hosted check"
-              else:
-                  enrollment = optional_provider_enrollment(provider)
-                  if enrollment is True:
-                      policy = "required (enrolled)"
-                      scope = "Enrolled protected representative hosted check"
-                  elif enrollment is False:
-                      policy = "optional"
-                      scope = "Optional provider is not configured"
-                      if result["status"] == "skipped":
-                          result = {**result, "status": "not_configured"}
-                      else:
-                          provider_configuration_ok = False
-                          result = {**result, "status": "fail"}
-                  else:
-                      policy = "invalid configuration"
-                      scope = f"{OPTIONAL_PROVIDER_FLAGS[provider]} must be true, false, or unset"
-                      provider_configuration_ok = False
-                      result = {**result, "status": "fail"}
-              provider_rows.append(("Live provider", provider, policy, result, scope))
+              primary = provider in {"OpenAI", "Anthropic"}
+              outcome = outcomes.get(provider.lower(), {"status": "missing"})
+              policy = "required" if primary else "supplemental"
+              scope = "Protected representative hosted check" if primary else "Supplemental hosted evidence"
+              provider_rows.append(("Live provider", provider, policy, {**result, "status": outcome["status"]}, scope))
 
           catalog_ok = True
           try:
@@ -637,15 +649,15 @@ jobs:
               and catalog_ok
               and family_results_ok
               and provider_configuration_ok
+              and provider_results_ok
               and official_results_ok
               and all(status == "pass" for status in required_results)
           )
-          decision = "pass" if qualified else "fail"
 
           lines = [
               "## Cargo AI Product Qualification",
               "",
-              "> ✅ **QUALIFIED** — every required result passed."
+              "> ✅ **Product Qualification: Passed**"
               if qualified
               else "> ❌ **BLOCKED** — at least one required result failed, was cancelled, skipped, or is missing.",
               "",
@@ -656,7 +668,9 @@ jobs:
               "| Direction | Check | Policy | Status | Scope | Completed (UTC) | Evidence |",
               "| --- | --- | --- | --- | --- | --- | --- |",
           ]
-          for direction, check, policy, result, scope in rows:
+          primary_rows = [row for row in rows if row[2] != "supplemental"]
+          supplemental_rows = [row for row in rows if row[2] == "supplemental"]
+          for direction, check, policy, result, scope in primary_rows:
               lines.append(
                   "| "
                   + " | ".join(
@@ -673,11 +687,15 @@ jobs:
                   )
                   + " |"
               )
+          lines.extend([
+              "", "<details>", "<summary>Supplemental provider details</summary>", "",
+              "| Provider | Result | Evidence |", "| --- | --- | --- |",
+          ])
+          for _, provider, _, result, _ in supplemental_rows:
+              lines.append("| " + " | ".join(table_cell(value) for value in (provider, STATUS_LABELS[result["status"]], result["evidence"])) + " |")
+          lines.extend(["", "</details>", ""])
           lines.extend(
               [
-                  "| Product | Product qualification decision | required | "
-                  f"{STATUS_LABELS[decision]} | Exact candidate and required evidence | {generated_at} | [Workflow run]({run_url}) |",
-                  "",
                   "JUnit and provenance artifacts remain the durable evidence. This summary contains no provider credentials or raw provider responses.",
               ]
           )
