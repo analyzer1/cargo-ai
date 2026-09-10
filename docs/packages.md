@@ -120,6 +120,23 @@ A local-source install builds declared tools with `cargo build --locked --releas
 
 ## Publish and pull hosted packages
 
+Inspect a hosted package before acquiring it:
+
+```bash
+cargo ai packages inspect data_integration --account alice
+cargo ai packages inspect --account --source-id SOURCE_ID --version-id VERSION_ID --json
+cargo ai packages install --account --source-id SOURCE_ID --version-id VERSION_ID --as data_integration
+cargo ai packages pull --source-id SOURCE_ID --version-id VERSION_ID
+```
+
+Use the opaque IDs returned by inspection. A source ID identifies its owner, so omit an account handle when using it. An exact version ID requires its source ID and conflicts with `--version`. Omitting both version selectors resolves the latest eligible version. Bare `packages inspect ALIAS` still inspects only an installed local alias.
+
+Hosted inspection returns server-observed identity, archive digest, size and publication time alongside package declarations and untrusted publisher statements. Human and `--json` output use the same snapshot. New format-1 packages include optional versioned inspection metadata: exact file hashes/sizes, description/license/source claims when supplied, build/schema and dependency-lock information, required provider capabilities and declared effects. Older format-1 packages remain readable and explicitly lack this metadata. Unknown or dynamic effects remain unknown; an inventory or checksum does not certify safe behavior.
+
+The returned `source_reference` follows the latest eligible version; `version_reference` selects one immutable version. Both use a read-only page under `https://api.cargo-ai.org/public`, with `format=json` available for machine-readable output. Copy the page's CLI command to acquire the package. References remain bound to IDs across owner-handle and package display-name changes. Private, archived and missing public references all return the same not-found response and are not cached.
+
+Hosted install and pull inspect metadata, download that exact source/version, and verify the snapshot's digest, size and manifest before materialization. Permission expansion still requires explicit acceptance before executable tools are built or local state changes.
+
 Account-backed package commands use a separate surface from account agents:
 
 ```bash
@@ -138,6 +155,18 @@ cargo ai packages pull data_integration --owner-handle alice --version 1.2.3
 ```
 
 Publishing uses `[project].name` and `[project].version`; versions for one hosted package identity must increase by semver. Publish a higher version rather than changing hosted content at the same version.
+
+Publication persists a credential-free request receipt under `.cargo-ai/publish-requests/` before sending. An interrupted or timed-out call has an unknown outcome: retry the unchanged project to reuse its identity. Identical completed content returns its original immutable version; conflicting content fails. A confirmed terminal receipt permits a subsequent operation to use a fresh request ID. Preserve pending receipts during recovery. Receipts are excluded from assembled packages and archives; keep the directory out of source control.
+
+Rename only the hosted display name, then publish later versions through the stable source ID:
+
+```bash
+cargo ai packages rename --source-id SOURCE_ID --name new_display_name
+cargo ai packages publish --source-id SOURCE_ID
+```
+
+Rename leaves historical manifests and bytes unchanged. Publication remains a developer-tools build command. Account credentials authorize the hosting service only; they are not runtime-provider credentials or package content.
+
 
 `pull` defaults to the latest published version and restores a project-shaped directory. `.cargo-ai/project.toml` remains the operative project manifest. The immutable package manifest and hosted receipt are retained as provenance under:
 
@@ -258,6 +287,8 @@ cargo ai packages uninstall data_integration --delete-data
 If `data/` is nonempty, the first command refuses to proceed. Back up or export needed state before using `--delete-data`, which permanently removes the package payload, runtime, metadata, and data directory.
 
 ## Cross-package bindings
+
+For an editable image-to-CSV example with generated-image provenance, declared tool source and SPDX inventory, see [Animal Patrol](../examples/animal-patrol/README.md). It can be built, installed and run locally without hosted publication.
 
 Bind each hosted alias used by a project to one source identity and semver range:
 

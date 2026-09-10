@@ -8,6 +8,7 @@ const PROJECTS_RESPONSE_MAX_BYTES: usize = 16 * 1024 * 1024;
 
 async fn post_projects_request(url: String, body: &Value) -> Result<Value, String> {
     let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(PROJECTS_REQUEST_TIMEOUT)
         .build()
         .map_err(|error| format!("Failed to configure projects request: {error}"))?;
@@ -80,9 +81,11 @@ pub async fn publish_project(
     package_sha256: &str,
     package_size_bytes: i64,
     package_archive_base64: &str,
+    request_id: &str,
+    hosted_source_id: Option<&str>,
 ) -> Result<Value, String> {
     let url = format!("{}/account", base_url.trim_end_matches('/'));
-    let body = build_publish_project_body(
+    let mut body = build_publish_project_body(
         access_token,
         project_name,
         project_version,
@@ -92,22 +95,51 @@ pub async fn publish_project(
         package_archive_base64,
     );
 
+    body["projects"]["publish"]["publish_request_id"] = json!(request_id);
+    if let Some(source) = hosted_source_id {
+        body["projects"]["publish"]["hosted_source_id"] = json!(source);
+    }
     post_projects_request(url, &body).await
 }
 
-/// Pull a published project package.
-pub async fn pull_project(
+pub async fn read_project(
     base_url: &str,
     access_token: &str,
     name: &str,
     owner_handle: Option<&str>,
     hosted_source_id: Option<&str>,
     version: Option<&str>,
+    hosted_version_id: Option<&str>,
+    inspect: bool,
 ) -> Result<Value, String> {
     let url = format!("{}/account", base_url.trim_end_matches('/'));
-    let body = build_pull_project_body(access_token, name, owner_handle, hosted_source_id, version);
+    let mut body =
+        build_pull_project_body(access_token, name, owner_handle, hosted_source_id, version);
+    if let Some(id) = hosted_version_id {
+        body["projects"]["pull"]["hosted_version_id"] = json!(id);
+    }
+    if inspect {
+        let payload = body["projects"]
+            .as_object_mut()
+            .unwrap()
+            .remove("pull")
+            .unwrap();
+        body["projects"]["inspect"] = payload;
+    }
 
     post_projects_request(url, &body).await
+}
+
+pub async fn rename_project(
+    base_url: &str,
+    access_token: &str,
+    source_id: &str,
+    name: &str,
+) -> Result<Value, String> {
+    let body = super::with_cargo_ai_metadata(json!({"action":"projects",
+        "credentials":{"access_token":access_token},
+        "projects":{"rename":{"hosted_source_id":source_id,"name":name}}}));
+    post_projects_request(format!("{}/account", base_url.trim_end_matches('/')), &body).await
 }
 
 pub async fn set_project_visibility(

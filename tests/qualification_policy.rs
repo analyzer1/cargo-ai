@@ -184,7 +184,14 @@ fn gate() -> &'static Path {
 }
 
 fn catalog() -> String {
-    include_str!("../.github/package-qualification-catalog.toml").to_string()
+    // Retain explicit coverage of the historical zero-official-package policy.
+    let mut value: toml::Value = toml::from_str(include_str!(
+        "../.github/package-qualification-catalog.toml"
+    ))
+    .unwrap();
+    value.as_table_mut().unwrap().remove("official_packages");
+    value["official_package_count"] = 0.into();
+    toml::to_string(&value).unwrap()
 }
 
 struct Dashboard {
@@ -589,4 +596,68 @@ fn main() {
         .output()
         .unwrap();
     assert!(!result.status.success());
+}
+
+fn with_official(mut data: Dashboard) -> Dashboard {
+    data.catalog = data
+        .catalog
+        .replace("official_package_count = 0", "official_package_count = 1");
+    data.catalog.push_str(&format!("\n[[official_packages]]\nrepository = \"cargo-ai/cargo-ai\"\nrevision = \"{}\"\ndeclaration_path = \"examples/animal-patrol/cargo-ai-qualification.toml\"\nplatforms = [\"ubuntu-latest\", \"macos-latest\", \"windows-latest\"]\nenabled = true\nrelease_required = true\n", "b".repeat(40)));
+    data.env
+        .insert("OFFICIAL_PACKAGE_RESULT".into(), "success".into());
+    for os in ["ubuntu-latest", "macos-latest", "windows-latest"] {
+        data.jobs["jobs"]
+            .as_array_mut()
+            .unwrap()
+            .push(Dashboard::job(&format!(
+                "Official package qualification ({os})"
+            )));
+    }
+    data
+}
+
+#[test]
+fn official_package_requires_its_own_complete_platform_evidence() {
+    assert!(with_official(Dashboard::new()).run().0.status.success());
+    for case in 0..8 {
+        let mut data = with_official(Dashboard::new());
+        let jobs = data.jobs["jobs"].as_array_mut().unwrap();
+        match case {
+            0 => {
+                jobs.pop();
+            }
+            1 => jobs.last_mut().unwrap()["conclusion"] = json!("failure"),
+            2 => jobs.last_mut().unwrap()["conclusion"] = json!("skipped"),
+            3 => jobs.last_mut().unwrap()["head_sha"] = json!("d".repeat(40)),
+            4 => {
+                let duplicate = jobs.last().unwrap().clone();
+                jobs.push(duplicate);
+            }
+            5 => {
+                data.env
+                    .insert("OFFICIAL_PACKAGE_RESULT".into(), "failure".into());
+            }
+            6 => data.catalog = data.catalog.replace("examples/animal-patrol/", "../"),
+            7 => data.catalog = data.catalog.replace(&"b".repeat(40), "develop"),
+            _ => unreachable!(),
+        }
+        assert!(!data.run().0.status.success(), "case {case}");
+    }
+    let fixture = Fixture::new();
+    let data = with_official(Dashboard::new());
+    fs::write(fixture.path("catalog.toml"), data.catalog).unwrap();
+    let output = fixture
+        .command("catalog")
+        .env("CATALOG_PATH", fixture.path("catalog.toml"))
+        .env("REQUESTED_OFFICIAL_PACKAGE", "true")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output = fs::read_to_string(fixture.path("output")).unwrap();
+    assert!(output.contains(&format!("sha={}\n", "b".repeat(40))));
+    assert!(output.contains("declaration=examples/animal-patrol/cargo-ai-qualification.toml\n"));
 }

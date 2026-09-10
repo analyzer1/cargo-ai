@@ -11,6 +11,11 @@ on:
       - tests/fixtures/package_qualification/**
   workflow_dispatch:
     inputs:
+      official_package:
+        description: Qualify the required official package from the exact candidate catalog
+        required: false
+        default: false
+        type: boolean
       package_repository:
         description: Allowlisted owner/repository (empty resolves the enabled catalog canary)
         required: false
@@ -44,6 +49,10 @@ on:
         type: boolean
   workflow_call:
     inputs:
+      official_package:
+        required: false
+        default: false
+        type: boolean
       package_repository:
         required: false
         type: string
@@ -73,7 +82,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: package-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: package-${{ github.workflow }}-${{ inputs.official_package && 'official' || 'canary' }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -82,7 +91,7 @@ env:
 
 jobs:
   qualify:
-    name: Source package qualification (${{ matrix.os }})
+    name: ${{ inputs.official_package && 'Official package qualification' || 'Source package qualification' }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     strategy:
@@ -91,6 +100,7 @@ jobs:
       matrix:
         os: ${{ fromJSON(inputs.platforms_json || '["ubuntu-latest","macos-latest","windows-latest"]') }}
     env:
+      REQUESTED_OFFICIAL_PACKAGE: ${{ inputs.official_package }}
       REQUESTED_PACKAGE_REPOSITORY: ${{ inputs.package_repository }}
       REQUESTED_PACKAGE_SHA: ${{ inputs.package_sha }}
       REQUESTED_DECLARATION_PATH: ${{ inputs.declaration_path }}
@@ -155,6 +165,16 @@ jobs:
           git -C cargo-ai config --local --unset-all http.https://github.com/.extraheader || true
           git -C package config --local --unset-all http.https://github.com/.extraheader || true
 
+      - name: Validate declaration parent for both candidates
+        id: package_root
+        shell: bash
+        env:
+          PACKAGE_CHECKOUT: ${{ github.workspace }}/package
+          PACKAGE_DECLARATION: ${{ steps.package.outputs.declaration }}
+        run: |
+          set -euo pipefail
+          cargo run --locked --manifest-path cargo-ai/Cargo.toml --example qualification-gate -- package-root
+
       - name: Run candidate lifecycle
         id: candidate
         continue-on-error: true
@@ -162,7 +182,8 @@ jobs:
         shell: bash
         env:
           CARGO_AI_HOME: ${{ runner.temp }}/cargo-ai-home
-          CARGO_AI_QUALIFICATION_PACKAGE_ROOT: ${{ github.workspace }}/package
+          CARGO_AI_QUALIFICATION_PACKAGE_ROOT: ${{ steps.package_root.outputs.root }}
+          CARGO_AI_QUALIFICATION_DECLARATION_PATH: ${{ steps.package_root.outputs.declaration_file }}
         run: |
           set -euo pipefail
           cd cargo-ai
@@ -185,7 +206,8 @@ jobs:
         shell: bash
         env:
           CARGO_AI_HOME: ${{ runner.temp }}/cargo-ai-baseline-home
-          CARGO_AI_QUALIFICATION_PACKAGE_ROOT: ${{ github.workspace }}/package
+          CARGO_AI_QUALIFICATION_PACKAGE_ROOT: ${{ steps.package_root.outputs.root }}
+          CARGO_AI_QUALIFICATION_DECLARATION_PATH: ${{ steps.package_root.outputs.declaration_file }}
         run: |
           set -euo pipefail
           cd cargo-ai-baseline
@@ -237,7 +259,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: package-qualification-${{ matrix.os }}
+          name: ${{ inputs.official_package && 'official-package-qualification' || 'package-qualification' }}-${{ matrix.os }}
           path: |
             qualification.xml
             provenance.json
@@ -246,7 +268,7 @@ jobs:
 
   summary:
     name: Package qualification summary
-    if: ${{ always() && github.event_name != 'pull_request' && inputs.emit_summary }}
+    if: ${{ always() && (github.event_name == 'pull_request' || inputs.emit_summary) }}
     needs: [qualify]
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -256,4 +278,4 @@ jobs:
           MATRIX_RESULT: ${{ needs.qualify.result }}
         run: |
           test "$MATRIX_RESULT" = "success"
-          echo "The required qualification canary passed on every declared platform." >> "$GITHUB_STEP_SUMMARY"
+          echo "The required package passed on every declared platform." >> "$GITHUB_STEP_SUMMARY"

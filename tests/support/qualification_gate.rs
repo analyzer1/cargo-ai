@@ -2,6 +2,7 @@
 
 mod qualification_catalog;
 mod qualification_dashboard;
+mod qualification_paths;
 mod qualification_policy;
 
 use qualification_policy::{Identity, Record, Result, Status};
@@ -174,6 +175,24 @@ fn aggregate() -> Result<()> {
 fn catalog() -> Result<()> {
     let raw = read(Path::new(&variable("CATALOG_PATH")?), 1024 * 1024)?;
     let catalog = qualification_catalog::Catalog::parse(&raw)?;
+    match env::var("REQUESTED_OFFICIAL_PACKAGE")
+        .unwrap_or_default()
+        .as_str()
+    {
+        "true" => {
+            if ["REQUESTED_PACKAGE_REPOSITORY", "REQUESTED_PACKAGE_SHA"]
+                .iter()
+                .any(|key| env::var(key).is_ok_and(|v| !v.is_empty()))
+                || env::var("REQUESTED_DECLARATION_PATH")
+                    .is_ok_and(|v| !v.is_empty() && v != "cargo-ai-qualification.toml")
+            {
+                return Err("official qualification uses only the candidate catalog identity");
+            }
+            return append("GITHUB_OUTPUT", &catalog.resolve_official()?);
+        }
+        "" | "false" => {}
+        _ => return Err("invalid official package selector"),
+    }
     let output = catalog.resolve(
         &env::var("REQUESTED_PACKAGE_REPOSITORY").unwrap_or_default(),
         &env::var("REQUESTED_PACKAGE_SHA").unwrap_or_default(),
@@ -188,11 +207,35 @@ fn main() {
         [mode, provider] if mode == "probe" => probe(provider),
         [mode] if mode == "aggregate" => aggregate(),
         [mode] if mode == "catalog" => catalog(),
-        _ => Err("usage: qualification-gate probe <provider> | aggregate | catalog"),
+        [mode] if mode == "package-root" => package_root(),
+        _ => Err("usage: qualification-gate probe <provider> | aggregate | catalog | package-root"),
     };
     if let Err(message) = result {
         // Errors are fixed descriptions, never raw evidence, environment or service responses.
         eprintln!("Qualification failed: {message}.");
         std::process::exit(1);
     }
+}
+
+fn package_root() -> Result<()> {
+    let path = qualification_paths::confined_file(
+        Path::new(&variable("PACKAGE_CHECKOUT")?),
+        &variable("PACKAGE_DECLARATION")?,
+        64 * 1024,
+    )?;
+    let parent = path
+        .parent()
+        .and_then(Path::to_str)
+        .ok_or("invalid package directory")?;
+    let name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or("invalid declaration name")?;
+    if parent.chars().any(char::is_control) {
+        return Err("invalid package directory");
+    }
+    append(
+        "GITHUB_OUTPUT",
+        &format!("root={parent}\ndeclaration_file={name}\n"),
+    )
 }

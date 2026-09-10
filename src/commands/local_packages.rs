@@ -355,13 +355,16 @@ fn run_install(install_m: &ArgMatches) -> bool {
 }
 
 pub(crate) async fn run_hosted_install(install_m: &ArgMatches) -> bool {
-    let Some(package_name) = install_m.get_one::<String>("source").map(String::as_str) else {
-        eprintln!("x Hosted install requires a package name before --account.");
-        return false;
-    };
-    let package_name = package_name.trim();
-    if package_name.is_empty() {
-        eprintln!("x Hosted install requires a non-empty package name.");
+    let source_id = install_m.get_one::<String>("source_id").map(String::as_str);
+    let version_id = install_m
+        .get_one::<String>("version_id")
+        .map(String::as_str);
+    let package_name = install_m
+        .get_one::<String>("source")
+        .map(String::as_str)
+        .unwrap_or("");
+    if package_name.is_empty() && source_id.is_none() {
+        eprintln!("x Hosted install requires a package name or --source-id.");
         return false;
     }
     let Some(alias) = install_m.get_one::<String>("alias").map(String::as_str) else {
@@ -392,6 +395,8 @@ pub(crate) async fn run_hosted_install(install_m: &ArgMatches) -> bool {
         package_name,
         owner_handle.as_deref(),
         version.as_deref(),
+        source_id,
+        version_id,
         alias,
         install_m.get_flag("replace"),
         install_m.get_flag("downgrade"),
@@ -732,6 +737,8 @@ async fn install_hosted_package(
     package_name: &str,
     owner_handle: Option<&str>,
     version: Option<&str>,
+    source_id: Option<&str>,
+    version_id: Option<&str>,
     alias: &str,
     replace: bool,
     downgrade: bool,
@@ -739,8 +746,10 @@ async fn install_hosted_package(
     keep_data: bool,
     delete_data: bool,
 ) -> Result<InstallAction, String> {
-    let response = pull_hosted_package(package_name, owner_handle, None, version).await?;
-    let prepared = prepare_hosted_response(&response, owner_handle, None)?;
+    let response =
+        pull_inspected_hosted_package(package_name, owner_handle, source_id, version, version_id)
+            .await?;
+    let prepared = prepare_hosted_response(&response, owner_handle, source_id)?;
     print_permission_summary(&prepared.manifest.permissions);
     let materialized = match materialize_prepared_package(
         &prepared,
@@ -933,9 +942,38 @@ async fn rollback_hosted_package(
 
 async fn pull_hosted_package(
     package_name: &str,
+    owner: Option<&str>,
+    source: Option<&str>,
+    version: Option<&str>,
+) -> Result<Value, String> {
+    pull_inspected_hosted_package(package_name, owner, source, version, None).await
+}
+
+pub(crate) async fn pull_inspected_hosted_package(
+    package_name: &str,
+    owner: Option<&str>,
+    source: Option<&str>,
+    version: Option<&str>,
+    version_id: Option<&str>,
+) -> Result<Value, String> {
+    let inspected =
+        read_hosted_package(package_name, owner, source, version, version_id, true).await?;
+    crate::commands::package_inspection::render_snapshot(&inspected)?;
+    let source = required_response_string(&inspected, "hosted_source_id")?;
+    let exact = required_response_string(&inspected, "hosted_version_id")?;
+    let downloaded =
+        read_hosted_package("", None, Some(&source), None, Some(&exact), false).await?;
+    crate::commands::package_inspection::validate_same_snapshot(&inspected, &downloaded)?;
+    Ok(downloaded)
+}
+
+pub(crate) async fn read_hosted_package(
+    package_name: &str,
     owner_handle: Option<&str>,
     hosted_source_id: Option<&str>,
     version: Option<&str>,
+    version_id: Option<&str>,
+    inspect: bool,
 ) -> Result<Value, String> {
     use crate::commands::account::helpers::{
         load_account_auth, persist_refreshed_access_token, refresh_access_token_for_retry,
@@ -947,13 +985,15 @@ async fn pull_hosted_package(
     let access_token_owned = auth.access_token;
     let refresh_token = auth.refresh_token;
 
-    let mut response = crate::infra_api::account::projects::pull_project(
+    let mut response = crate::infra_api::account::projects::read_project(
         INFRA_BASE_URL,
         access_token_owned.as_str(),
         package_name,
         owner_handle,
         hosted_source_id,
         version,
+        version_id,
+        inspect,
     )
     .await
     .map_err(|error| format!("Request failed: {error}"))?;
@@ -990,13 +1030,15 @@ async fn pull_hosted_package(
                         refreshed_expires_in,
                     );
                 }
-                response = crate::infra_api::account::projects::pull_project(
+                response = crate::infra_api::account::projects::read_project(
                     INFRA_BASE_URL,
                     retry_access_token.as_str(),
                     package_name,
                     owner_handle,
                     hosted_source_id,
                     version,
+                    version_id,
+                    inspect,
                 )
                 .await
                 .map_err(|error| format!("Request failed after session refresh: {error}"))?;
@@ -1004,13 +1046,26 @@ async fn pull_hosted_package(
         }
     }
 
-    if !is_hosted_pull_success(&response) {
+    let expected_type = if inspect {
+        "account_projects_inspect_succeeded"
+    } else {
+        "account_projects_pull_succeeded"
+    };
+    if response["status"] != "success" || response["type"] != expected_type {
         return Err(backend_response_message(
             &response,
             "Hosted package pull did not succeed.",
         ));
     }
-    validate_hosted_response_matches_request(&response, package_name, version)?;
+    let selected_name = if hosted_source_id.is_some() {
+        ""
+    } else {
+        package_name
+    };
+    validate_hosted_response_matches_request(&response, selected_name, version)?;
+    if version_id.is_some_and(|id| response["hosted_version_id"].as_str() != Some(id)) {
+        return Err("Hosted response did not match the requested immutable version ID.".into());
+    }
     validate_hosted_response_provenance(&response, owner_handle, hosted_source_id)?;
 
     Ok(response)
@@ -1100,6 +1155,7 @@ fn prepare_hosted_response(
     )?;
     prepared.content_sha256 = decoded_sha256;
     validate_hosted_response_matches_manifest(response, &prepared.manifest)?;
+    super::package_inspection::validate_archive_manifest(response, staging_guard.path())?;
     staging_guard.release();
     Ok(prepared)
 }
@@ -1380,6 +1436,12 @@ fn load_package_manifest(path: &Path) -> Result<PackageManifestDocument, String>
             error
         )
     })?;
+    let raw: toml::Value =
+        toml::from_str(&contents).map_err(|error| format!("Invalid package manifest: {error}"))?;
+    super::package_metadata::verify_inventory(
+        path.parent().ok_or("Package manifest has no parent")?,
+        &serde_json::to_value(raw).map_err(|e| e.to_string())?,
+    )?;
     let manifest: PackageManifestDocument = toml::from_str(contents.as_str()).map_err(|error| {
         format!(
             "Failed to parse package manifest '{}': {}",
@@ -2339,21 +2401,14 @@ fn print_permission_summary(permissions: &PackagePermissionProfileDocument) {
     }
 }
 
-fn is_hosted_pull_success(response: &Value) -> bool {
-    response
-        .get("type")
-        .and_then(Value::as_str)
-        .map(|kind| kind == "account_projects_pull_succeeded")
-        .unwrap_or(false)
-}
-
 fn validate_hosted_response_matches_request(
     response: &Value,
     requested_package_name: &str,
     requested_version: Option<&str>,
 ) -> Result<(), String> {
-    let resolved_package_name = required_response_string(response, "project")?;
-    if resolved_package_name != requested_package_name {
+    let resolved_package_name = optional_response_string(response, "display_name")
+        .unwrap_or(required_response_string(response, "project")?);
+    if !requested_package_name.is_empty() && resolved_package_name != requested_package_name {
         return Err(format!(
             "Hosted pull response returned package `{resolved_package_name}` for requested package `{requested_package_name}`."
         ));
@@ -4727,6 +4782,38 @@ fn main() {
     }
 
     #[test]
+    fn hosted_archive_must_match_all_inspected_declarations_before_tool_build() {
+        let store = PackagesRootGuard::new("hosted-manifest-binding");
+        let root = temp_package_root("hosted-manifest-binding");
+        add_source_tool_fixture(&root, "usage_importer", "must-not-build");
+        write_broken_source_tool_fixture_main(&root, "usage_importer");
+        let archive = crate::commands::account::create_package_archive_bytes(&root).unwrap();
+        let manifest: Value =
+            toml::from_str(&std::fs::read_to_string(root.join("cargo-ai-package.toml")).unwrap())
+                .unwrap();
+        let mut response = serde_json::json!({
+            "project": "data_integration", "project_version": "1.0.0",
+            "hosted_source_id":"source-id", "hosted_version_id":"version-id",
+            "package_sha256":crate::commands::account::sha256_hex(&archive),
+            "package_size_bytes":archive.len(), "package_manifest":manifest,
+            "package_archive_base64":base64::engine::general_purpose::STANDARD.encode(&archive)
+        });
+        response["package_manifest"]["permissions"]["subprocess"] = "allowed".into();
+        let error = super::prepare_hosted_response(&response, None, None).unwrap_err();
+        assert!(error.contains("archive manifest differs"), "{error}");
+        assert!(!super::installed_package_root("data_integration").exists());
+        assert!(!root.join("tools/usage_importer/target").exists());
+        assert_eq!(
+            std::fs::read_dir(super::packages_staging_root())
+                .unwrap()
+                .count(),
+            0
+        );
+        assert!(store.path.exists());
+        remove_temp_dir_if_present(&root);
+    }
+
+    #[test]
     fn hosted_legacy_wire_hash_survives_install_and_runtime_repair() {
         let _store = PackagesRootGuard::new("hosted-legacy-wire-hash");
         let package_root = temp_package_root("hosted-legacy-wire-hash");
@@ -4738,6 +4825,7 @@ fn main() {
             "hosted_source_id": "source-id",
             "hosted_version_id": "version-id",
             "package_sha256": wire_sha256,
+            "package_manifest": toml::from_str::<serde_json::Value>(&std::fs::read_to_string(package_root.join("cargo-ai-package.toml")).unwrap()).unwrap(),
             "package_size_bytes": archive.len(),
             "package_archive_base64": base64::engine::general_purpose::STANDARD.encode(&archive)
         });

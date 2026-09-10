@@ -1,6 +1,9 @@
 //! Bounded source-package qualification contract and process runner.
 
+#[path = "support/qualification_paths.rs"]
+mod qualification_paths;
 mod support;
+use qualification_paths::confined_file;
 
 use serde::Deserialize;
 use std::collections::BTreeSet;
@@ -40,6 +43,18 @@ struct QualificationEntrypoint {
     name: String,
     run: bool,
     hatch: bool,
+    #[serde(default)]
+    fixture: Option<ImageCsvFixture>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImageCsvFixture {
+    kind: String,
+    response: String,
+    image: String,
+    expected_csv: String,
+    spdx: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -117,6 +132,23 @@ fn validate_declaration(declaration: &QualificationDeclaration) -> Result<(), St
     }
     for entrypoint in &declaration.entrypoints {
         validate_identifier(&entrypoint.name, "entrypoint name")?;
+        if let Some(fixture) = &entrypoint.fixture {
+            if fixture.kind != "image_findings_csv" || !entrypoint.run {
+                return Err(
+                    "Image CSV fixtures require a runnable image_findings_csv contract.".into(),
+                );
+            }
+            for path in [
+                &fixture.response,
+                &fixture.image,
+                &fixture.expected_csv,
+                &fixture.spdx,
+            ] {
+                if !qualification_paths::relative_file(path) {
+                    return Err("Fixture paths must be portable relative files.".into());
+                }
+            }
+        }
         if !entrypoint.run && !entrypoint.hatch {
             return Err(format!(
                 "entrypoint '{}' must enable run, hatch, or both",
@@ -279,17 +311,23 @@ fn package_catalog_preserves_canary_and_official_classification() {
         catalog.qualification_canaries[0].package_id,
         "qualification_canary"
     );
-    assert_eq!(catalog.official_package_count, 0);
-    assert!(catalog.official_packages.is_empty());
+    assert_eq!(catalog.official_package_count, 1);
+    assert_eq!(catalog.official_packages.len(), 1);
+    assert_eq!(catalog.official_packages[0].package_id, "animal_patrol");
 }
 
 #[test]
 #[ignore = "run explicitly in the source-package qualification workflow"]
 fn external_package_qualification_runs_mandatory_lifecycle() {
-    let package_root = std::env::var_os("CARGO_AI_QUALIFICATION_PACKAGE_ROOT")
+    let checkout = std::env::var_os("CARGO_AI_QUALIFICATION_PACKAGE_ROOT")
         .map(PathBuf::from)
         .expect("CARGO_AI_QUALIFICATION_PACKAGE_ROOT must identify the checked-out package");
-    let declaration = load_declaration(&package_root.join(DECLARATION_FILE))
+    let declaration_path = std::env::var("CARGO_AI_QUALIFICATION_DECLARATION_PATH")
+        .unwrap_or_else(|_| DECLARATION_FILE.into());
+    let declaration_path = confined_file(&checkout, &declaration_path, 64 * 1024)
+        .expect("declaration must stay inside anonymous checkout");
+    let package_root = declaration_path.parent().unwrap().to_path_buf();
+    let declaration = load_declaration(&declaration_path)
         .expect("external qualification declaration should be valid");
     let fixture = Fixture::new("external");
 
@@ -321,6 +359,12 @@ fn external_package_qualification_runs_mandatory_lifecycle() {
         .output()
         .expect("external package command should start");
     assert_success(&package, "external package command");
+
+    for entrypoint in &declaration.entrypoints {
+        if let Some(data) = &entrypoint.fixture {
+            verify_spdx_inventory(&assembled, &data.spdx);
+        }
+    }
 
     let install = fixture
         .cargo_ai_command(&fixture.root)
@@ -362,8 +406,20 @@ fn external_package_qualification_runs_mandatory_lifecycle() {
             assert_success(&hatch, "external installed hatch check");
         }
         if entrypoint.run {
-            let server =
-                OneShotHttpServer::json("/v1/chat/completions", openai_success_response("ready"));
+            let content = if let Some(data) = &entrypoint.fixture {
+                let path = confined_file(&package_root, &data.response, 16 * 1024).unwrap();
+                let value: serde_json::Value =
+                    serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+                assert!(value.is_object() && value["findings"].is_array());
+                value.to_string()
+            } else {
+                "ready".into()
+            };
+            let mut provider_response = openai_success_response(&content);
+            if entrypoint.fixture.is_some() {
+                provider_response["choices"][0]["message"]["content"] = content.into();
+            }
+            let server = OneShotHttpServer::json("/v1/chat/completions", provider_response);
             let run = fixture
                 .cargo_ai_command(&fixture.root)
                 .args([
@@ -383,8 +439,30 @@ fn external_package_qualification_runs_mandatory_lifecycle() {
                 ])
                 .output()
                 .expect("external installed run should start");
-            let _ = server.finish();
+            let request = server.finish();
             assert_success(&run, "external installed run");
+            if let Some(data) = &entrypoint.fixture {
+                use base64::Engine as _;
+                let image =
+                    fs::read(confined_file(&package_root, &data.image, 4 * 1024 * 1024).unwrap())
+                        .unwrap();
+                assert!(
+                    request.contains(&base64::engine::general_purpose::STANDARD.encode(&image)),
+                    "fixture image must actually reach the loopback provider"
+                );
+                let expected =
+                    fs::read(confined_file(&package_root, &data.expected_csv, 64 * 1024).unwrap())
+                        .unwrap();
+                let csv = fixture
+                    .cargo_ai_home
+                    .join("packages")
+                    .join(&declaration.package_id)
+                    .join("data/findings.csv");
+                assert_eq!(
+                    fs::read(csv).expect("installed tool must materialize its CSV"),
+                    expected
+                );
+            }
         }
     }
 
@@ -402,6 +480,69 @@ fn external_package_qualification_runs_mandatory_lifecycle() {
     assert_success(&uninstall, "external package uninstall");
 
     run_declared_checks(&fixture, &package_root, &declaration);
+}
+
+fn verify_spdx_inventory(assembled: &Path, relative: &str) {
+    use sha2::{Digest, Sha256};
+    let document: serde_json::Value = serde_json::from_slice(
+        &fs::read(confined_file(assembled, relative, 512 * 1024).unwrap()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(document["spdxVersion"], "SPDX-2.3");
+    let files = document["files"]
+        .as_array()
+        .expect("SPDX file inventory is required");
+    assert!(!files.is_empty() && files.len() <= 10_000);
+    let mut declared = BTreeSet::new();
+    for file in files {
+        let path = file["fileName"]
+            .as_str()
+            .unwrap()
+            .strip_prefix("./")
+            .unwrap();
+        assert!(declared.insert(path.to_string()), "duplicate SPDX file");
+        let bytes = fs::read(confined_file(assembled, path, 100 * 1024 * 1024).unwrap()).unwrap();
+        let hashes: Vec<_> = file["checksums"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|c| c["algorithm"] == "SHA256")
+            .collect();
+        assert_eq!(hashes.len(), 1);
+        assert_eq!(
+            hashes[0]["checksumValue"],
+            format!("{:x}", Sha256::digest(bytes)),
+            "SPDX file bytes: {path}"
+        );
+    }
+    fn walk(root: &Path, directory: &Path, files: &mut BTreeSet<String>) {
+        for entry in fs::read_dir(directory).unwrap() {
+            let entry = entry.unwrap();
+            let kind = entry.file_type().unwrap();
+            if kind.is_dir() {
+                walk(root, &entry.path(), files);
+            } else {
+                assert!(kind.is_file());
+                files.insert(
+                    entry
+                        .path()
+                        .strip_prefix(root)
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .replace('\\', "/"),
+                );
+            }
+        }
+    }
+    let mut actual = BTreeSet::new();
+    walk(assembled, assembled, &mut actual);
+    actual.remove(relative);
+    actual.remove("cargo-ai-package.toml");
+    assert_eq!(
+        declared, actual,
+        "SPDX must cover every distributed file except its own document and hashing manifest"
+    );
 }
 
 fn rustc_host_target(fixture: &Fixture, package_root: &Path) -> String {

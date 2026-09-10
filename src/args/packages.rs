@@ -18,6 +18,40 @@ fn publish_command() -> Command {
         )
 }
 
+fn opaque_id(raw: &str) -> Result<String, String> {
+    if raw.is_empty()
+        || raw.len() > 128
+        || !raw
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        return Err("Expected 1 to 128 letters, digits, '-' or '_' characters".into());
+    }
+    Ok(raw.to_string())
+}
+
+fn hosted_selectors(command: Command, require_account: bool) -> Command {
+    let mut source = Arg::new("source_id")
+        .long("source-id")
+        .num_args(1)
+        .value_name("ID")
+        .value_parser(opaque_id)
+        .help("Stable hosted source identity, independent of display name");
+    if require_account {
+        source = source.requires("account");
+    }
+    command.arg(source).arg(
+        Arg::new("version_id")
+            .long("version-id")
+            .num_args(1)
+            .value_name("ID")
+            .requires("source_id")
+            .conflicts_with("version")
+            .value_parser(opaque_id)
+            .help("Immutable hosted version identity"),
+    )
+}
+
 pub fn command() -> Command {
     let command = Command::new("packages")
         .about("Manage local and hosted packages")
@@ -339,14 +373,166 @@ pub fn command() -> Command {
                 ),
         );
 
+    let command = command
+        .mut_subcommand("install", |c| hosted_selectors(c, true))
+        .mut_subcommand("inspect", |c| {
+            hosted_selectors(c, true)
+                .about("Inspect an installed alias or a hosted package before installation")
+                .mut_arg("alias", |a| {
+                    a.required(false).required_unless_present("account")
+                })
+                .arg(
+                    Arg::new("account")
+                        .long("account")
+                        .num_args(0..=1)
+                        .default_missing_value("")
+                        .value_name("HANDLE"),
+                )
+                .arg(
+                    Arg::new("version")
+                        .long("version")
+                        .num_args(1)
+                        .requires("account")
+                        .value_name("SEMVER"),
+                )
+                .arg(
+                    Arg::new("json")
+                        .long("json")
+                        .requires("account")
+                        .action(ArgAction::SetTrue),
+                )
+        })
+        .mut_subcommand("pull", |c| {
+            hosted_selectors(c, false)
+                .mut_group("pull_name", |g| g.required(false))
+                .arg(
+                    Arg::new("account")
+                        .long("account")
+                        .num_args(0..=1)
+                        .default_missing_value("")
+                        .conflicts_with("owner_handle"),
+                )
+        })
+        .subcommand(
+            Command::new("rename")
+                .about("Rename a hosted source without changing its stable identity")
+                .arg(
+                    Arg::new("source_id")
+                        .long("source-id")
+                        .num_args(1)
+                        .required(true)
+                        .value_parser(opaque_id),
+                )
+                .arg(Arg::new("name").long("name").num_args(1).required(true)),
+        );
+
     #[cfg(feature = "developer-tools")]
-    let command = command.subcommand(publish_command());
+    let command = command.subcommand(
+        publish_command().arg(
+            Arg::new("source_id")
+                .long("source-id")
+                .num_args(1)
+                .value_parser(opaque_id)
+                .help("Stable source to publish after a display rename"),
+        ),
+    );
 
     command
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn inspection_and_immutable_selectors_preserve_local_commands() {
+        super::command().debug_assert();
+        for args in [
+            vec!["packages", "inspect", "local_alias"],
+            vec![
+                "packages",
+                "inspect",
+                "example",
+                "--account",
+                "alice",
+                "--json",
+            ],
+            vec![
+                "packages",
+                "inspect",
+                "--account",
+                "--source-id",
+                "source",
+                "--version-id",
+                "version",
+            ],
+            vec![
+                "packages",
+                "install",
+                "--account",
+                "--source-id",
+                "source",
+                "--version-id",
+                "version",
+                "--as",
+                "local_alias",
+            ],
+            vec![
+                "packages",
+                "pull",
+                "--source-id",
+                "source",
+                "--version-id",
+                "version",
+            ],
+            vec![
+                "packages",
+                "rename",
+                "--source-id",
+                "source",
+                "--name",
+                "new_name",
+            ],
+        ] {
+            super::command()
+                .try_get_matches_from(args.clone())
+                .unwrap_or_else(|e| panic!("{args:?}: {e}"));
+        }
+        for args in [
+            vec!["packages", "inspect"],
+            vec!["packages", "inspect", "local_alias", "--json"],
+            vec!["packages", "inspect", "--source-id", "source"],
+            vec![
+                "packages",
+                "inspect",
+                "--account",
+                "--version-id",
+                "version",
+            ],
+            vec![
+                "packages",
+                "inspect",
+                "--account",
+                "--source-id",
+                "source",
+                "--version-id",
+                "version",
+                "--version",
+                "1.0.0",
+            ],
+            vec![
+                "packages",
+                "inspect",
+                "--account",
+                "--source-id",
+                "../escape",
+            ],
+        ] {
+            assert!(
+                super::command().try_get_matches_from(args.clone()).is_err(),
+                "{args:?}"
+            );
+        }
+    }
+
     #[test]
     fn list_defaults_to_local_without_account_selector() {
         let matches = super::command()

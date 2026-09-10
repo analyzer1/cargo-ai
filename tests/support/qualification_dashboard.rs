@@ -222,14 +222,41 @@ pub fn render(input: &Inputs) -> Result<(String, bool)> {
         .ok()
         .filter(|_| catalog_ok)
         .map(|c| c.official_package_count);
-    let official_ok = count == Some(0);
-    let official_scope = match count {
-        Some(0) => "No registered official packages".into(),
-        Some(n) => format!("{n} registered; aggregate results required"),
-        None => "Registered count unavailable".into(),
+    let mut official = family("Official package qualification");
+    let official_row = catalog
+        .as_ref()
+        .ok()
+        .filter(|_| catalog_ok)
+        .and_then(|c| c.official().ok());
+    let official_ok = match count {
+        Some(0) => {
+            official.status = Status::Skipped;
+            matches!(
+                input.get("OFFICIAL_PACKAGE_RESULT"),
+                "" | "skipped" | "success"
+            )
+        }
+        Some(1) => {
+            official_row.is_some()
+                && official.status == Status::Pass
+                && input.get("OFFICIAL_PACKAGE_RESULT") == "success"
+        }
+        _ => false,
     };
-    let official = Evidence { status: if official_ok { Status::Skipped } else { Status::Missing },
-        completed: "—".into(), links: format!("[Qualification catalog](https://github.com/{repo}/blob/{candidate}/.github/package-qualification-catalog.toml)"), attempt, absent: false };
+    let official_scope = match (count, official_row) {
+        (Some(0), _) => "No registered official packages".into(),
+        (Some(1), Some(row)) => format!(
+            "[{}@{}](https://github.com/{}/tree/{}); 3 platforms",
+            row.repository,
+            &row.revision[..12],
+            row.repository,
+            row.revision
+        ),
+        _ => {
+            official.status = Status::Missing;
+            "Official catalog unavailable or unsupported".into()
+        }
+    };
     let needs = serde_json::from_str::<BTreeMap<String, Need>>(input.get("PROVIDER_PROBE_RECORDS"));
     let mut providers_ok = needs.is_ok();
     let needs = needs.unwrap_or_default();

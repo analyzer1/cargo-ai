@@ -56,7 +56,7 @@ cargo test --locked --test content_package_qualification
 
 No command above needs a provider key or Cargo AI account credential, and each process test uses a temporary `CARGO_AI_HOME`. Qualification rules, report validation, summary rendering, package-catalog resolution and cache hashing run in Rust; this path requires no Python interpreter. The `qualification_policy` target builds and exercises the real maintainer-only `qualification-gate` Cargo example with synthetic inputs. The example is not an installed product command. CI retains YAML and bounded shell for checkout, job retrieval and routing.
 
-The example routes `probe <provider>`, `aggregate` and `catalog` using the workflow’s explicit inputs. Only protected live jobs invoke probe mode. Aggregate mode requires candidate/run/job identity, matching dependency outputs and the candidate catalog before writing a passing summary. Catalog mode validates an allowlisted exact revision and a portable package-relative declaration before package checkout. Helper/build/output failures remain failures.
+The example routes `probe <provider>`, `aggregate`, `catalog` and `package-root` using the workflow’s explicit inputs. Only protected live jobs invoke probe mode. Aggregate mode requires candidate/run/job identity, matching dependency outputs and the candidate catalog before writing a passing summary. Catalog mode validates an allowlisted exact revision and a portable package-relative declaration before package checkout. Package-root mode validates the declared file beneath the anonymous checkout, rejects links/traversal and supplies its parent to both the candidate and diagnostic baseline. Helper/build/output failures remain failures.
 
 ## Maintainer provider testing
 
@@ -139,6 +139,9 @@ Package repositories own their full unit, integration, and domain-specific suite
 
 Shell command strings, path traversal, embedded credentials, and secret requests are rejected. The central catalog distinguishes qualification canaries from official packages. A passing canary proves the harness; it never counts as an official package.
 
+A declaration can live in a bounded subdirectory of the enrolled repository. The optional `image_findings_csv` entrypoint fixture names relative JSON response, image, expected CSV and SPDX inventory files. It tests that the actual image reaches the loopback provider and the installed tool writes the expected CSV; it never substitutes for live perception or protected provider proof. Mandatory lifecycle stages, platform coverage and time limits still apply. The Package Qualification summary runs on pull requests and requires every declared platform to succeed; non-PR runs retain their `emit_summary` control and failures remain visible.
+
+
 The public `cargo-ai/cargo-ai-qualification-canary` is the minimal real cross-repository fixture. The reusable workflow checks out both Cargo AI and package revisions by immutable commit, removes checkout credentials before package-controlled code runs, and emits JUnit plus sanitized provenance. Package build scripts and procedural macros still execute as code on a disposable runner, so only reviewed catalog entries are eligible.
 
 The installed interpreted run proves the canary's structured Rust tool through the version-bound package runtime. The installed hatch compile check uses `--ignore-tools`: current hatch auditing resolves project source tools, while installed runtime tools are checked and executed by the interpreted package path. This is a stated coverage boundary, not a claim that hatch independently re-audits the installed runtime tool.
@@ -217,3 +220,5 @@ The package catalog starts fail-closed until the public canary caller and its im
 ---
 
 [Documentation hub](./README.md) · [Cargo AI README](../README.md)
+
+The official Animal Patrol source is enrolled separately from the source canary at an exact reviewed revision in the package catalog. Its image-to-CSV fixture requires all three native platforms. Catalog enrollment identifies source for qualification; it does not certify a hosted publication or replace the fresh Product Qualification decision.

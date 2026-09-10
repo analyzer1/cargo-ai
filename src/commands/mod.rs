@@ -19,7 +19,11 @@ pub mod new;
 #[cfg(feature = "developer-tools")]
 pub mod package;
 pub(crate) mod package_dependencies;
+pub(crate) mod package_inspection;
 pub(crate) mod package_lock;
+pub(crate) mod package_metadata;
+#[cfg(feature = "developer-tools")]
+pub(crate) mod package_publication;
 pub mod packages;
 pub mod profile;
 pub mod run;

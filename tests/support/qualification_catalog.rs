@@ -53,6 +53,41 @@ fn declaration(value: &str) -> bool {
 }
 
 impl Catalog {
+    pub fn official(&self) -> Result<&Package> {
+        if self.official_package_count != 1 || self.official_packages.len() != 1 {
+            return Err("exactly one official package must be enrolled");
+        }
+        let row = &self.official_packages[0];
+        let platforms = row
+            .platforms
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        if !row.enabled
+            || !row.release_required
+            || !repository(&row.repository)
+            || !hexadecimal(&row.revision, 40)
+            || !declaration(&row.declaration_path)
+            || row.platforms.len() != 3
+            || platforms
+                != std::collections::BTreeSet::from([
+                    "ubuntu-latest",
+                    "macos-latest",
+                    "windows-latest",
+                ])
+        {
+            return Err(
+                "official package requires an exact enabled source and all three platforms",
+            );
+        }
+        Ok(row)
+    }
+
+    pub fn resolve_official(&self) -> Result<String> {
+        let row = self.official()?;
+        self.resolve(&row.repository, &row.revision, &row.declaration_path)
+    }
+
     pub fn parse(raw: &str) -> Result<Self> {
         if raw.len() > 1024 * 1024 {
             return Err("oversized qualification catalog");

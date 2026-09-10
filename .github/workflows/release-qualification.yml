@@ -53,6 +53,15 @@ jobs:
       baseline_cargo_ai_sha: ${{ inputs.baseline_cargo_ai_sha }}
       emit_summary: false
 
+  official_package:
+    name: Official-package family
+    uses: ./.github/workflows/package-qualification.yml
+    with:
+      official_package: true
+      cargo_ai_sha: ${{ inputs.cargo_ai_sha || github.sha }}
+      baseline_cargo_ai_sha: ${{ inputs.baseline_cargo_ai_sha }}
+      emit_summary: false
+
   live_openai:
     name: Live OpenAI conformance
     runs-on: ubuntu-latest
@@ -290,7 +299,7 @@ jobs:
   summary:
     name: Product qualification summary
     if: ${{ always() }}
-    needs: [deterministic, packages, live_openai, live_anthropic, live_gemini, live_xai, live_mistral]
+    needs: [deterministic, packages, official_package, live_openai, live_anthropic, live_gemini, live_xai, live_mistral]
     runs-on: ubuntu-latest
     environment: release-qualification
     timeout-minutes: 5
@@ -316,6 +325,7 @@ jobs:
           PROVIDER_PROBE_RECORDS: ${{ toJSON(needs) }}
           DETERMINISTIC_RESULT: ${{ needs.deterministic.result }}
           PACKAGE_RESULT: ${{ needs.packages.result }}
+          OFFICIAL_PACKAGE_RESULT: ${{ needs.official_package.result }}
           CARGO_AI_SHA: ${{ inputs.cargo_ai_sha || github.sha }}
           TRUSTED_TRIGGER_SHA: ${{ github.sha }}
           CATALOG_CHECKOUT_OUTCOME: ${{ steps.candidate_metadata.outcome }}
@@ -341,6 +351,9 @@ jobs:
                 "Source package qualification (ubuntu-latest)"
                 "Source package qualification (macos-latest)"
                 "Source package qualification (windows-latest)"
+                "Official package qualification (ubuntu-latest)"
+                "Official package qualification (macos-latest)"
+                "Official package qualification (windows-latest)"
                 "Live OpenAI conformance"
                 "Live Anthropic conformance"
                 "Live Gemini conformance"

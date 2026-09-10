@@ -35,13 +35,20 @@ enum ProjectsCommand {
     #[cfg(feature = "developer-tools")]
     Publish {
         profile: String,
+        source_id: Option<String>,
     },
     Pull {
+        source_id: Option<String>,
+        version_id: Option<String>,
         name: String,
         owner_handle: Option<String>,
         version: Option<String>,
         output_dir: Option<PathBuf>,
         force: bool,
+    },
+    Rename {
+        source_id: String,
+        name: String,
     },
     Visibility {
         name: String,
@@ -83,6 +90,9 @@ struct PulledPackageHostedReceiptDocument {
 #[cfg(feature = "developer-tools")]
 #[derive(Clone, Debug)]
 struct PublishPayload {
+    receipt_root: PathBuf,
+    request_id: String,
+    hosted_source_id: Option<String>,
     project_name: String,
     project_version: String,
     package_manifest: Value,
@@ -173,16 +183,20 @@ pub async fn run(projects_m: &ArgMatches) -> bool {
             .unwrap_or_default()
             .trim()
             .to_string();
-        if name.is_empty() {
-            eprintln!("x Missing package name. Provide NAME or --name <NAME>.");
+        if name.is_empty() && pull_m.get_one::<String>("source_id").is_none() {
+            eprintln!("x Missing package name. Provide NAME, --name <NAME>, or --source-id <ID>.");
             return false;
         }
 
         ProjectsCommand::Pull {
             name,
+            source_id: pull_m.get_one::<String>("source_id").cloned(),
+            version_id: pull_m.get_one::<String>("version_id").cloned(),
             owner_handle: pull_m
                 .get_one::<String>("owner_handle")
-                .map(|s| s.to_string()),
+                .or_else(|| pull_m.get_one::<String>("account"))
+                .filter(|s| !s.is_empty())
+                .cloned(),
             version: pull_m.get_one::<String>("version").map(|s| s.to_string()),
             output_dir: match pull_m.get_one::<String>("output_dir") {
                 Some(raw) if raw.trim().is_empty() => {
@@ -193,6 +207,11 @@ pub async fn run(projects_m: &ArgMatches) -> bool {
                 None => None,
             },
             force: pull_m.get_flag("force"),
+        }
+    } else if let Some(rename_m) = projects_m.subcommand_matches("rename") {
+        ProjectsCommand::Rename {
+            source_id: rename_m.get_one::<String>("source_id").unwrap().clone(),
+            name: rename_m.get_one::<String>("name").unwrap().clone(),
         }
     } else if let Some(visibility_m) = projects_m.subcommand_matches("visibility") {
         let Some(name) = visibility_m.get_one::<String>("name") else {
@@ -218,6 +237,7 @@ pub async fn run(projects_m: &ArgMatches) -> bool {
         #[cfg(feature = "developer-tools")]
         if let Some(publish_m) = projects_m.subcommand_matches("publish") {
             ProjectsCommand::Publish {
+                source_id: publish_m.get_one::<String>("source_id").cloned(),
                 profile: publish_m
                     .get_one::<String>("profile")
                     .map(|s| s.to_string())
@@ -253,8 +273,20 @@ pub async fn run(projects_m: &ArgMatches) -> bool {
     let mut prepared_publish_payload: Option<PublishPayload> = None;
 
     #[cfg(feature = "developer-tools")]
-    if let ProjectsCommand::Publish { profile } = &projects_command {
-        match prepare_publish_payload(profile.as_str()) {
+    if let ProjectsCommand::Publish { profile, source_id } = &projects_command {
+        match prepare_publish_payload(profile.as_str()).and_then(|mut payload| {
+            let root = current_project_root()?.ok_or("No project root")?;
+            payload.receipt_root = root.clone();
+            payload.hosted_source_id = source_id.clone();
+            payload.request_id = crate::commands::package_publication::request_id(
+                &root,
+                &payload.project_name,
+                &payload.project_version,
+                &payload.package_sha256,
+                source_id.as_deref(),
+            )?;
+            Ok(payload)
+        }) {
             Ok(payload) => prepared_publish_payload = Some(payload),
             Err(error) => {
                 eprintln!("x {error}");
@@ -288,17 +320,8 @@ pub async fn run(projects_m: &ArgMatches) -> bool {
                 .as_ref()
                 .expect("publish payload should be prepared");
 
-            match infra_api::account::projects::publish_project(
-                INFRA_BASE_URL,
-                access_token_owned.as_str(),
-                payload.project_name.as_str(),
-                payload.project_version.as_str(),
-                payload.package_manifest.clone(),
-                payload.package_sha256.as_str(),
-                payload.package_size_bytes,
-                payload.package_archive_base64.as_str(),
-            )
-            .await
+            match transmit_publish_payload(INFRA_BASE_URL, access_token_owned.as_str(), payload)
+                .await
             {
                 Ok(r) => r,
                 Err(e) => {
@@ -308,17 +331,18 @@ pub async fn run(projects_m: &ArgMatches) -> bool {
             }
         }
         ProjectsCommand::Pull {
+            source_id,
+            version_id,
             name,
             owner_handle,
             version,
             ..
-        } => match infra_api::account::projects::pull_project(
-            INFRA_BASE_URL,
-            access_token_owned.as_str(),
+        } => match crate::commands::local_packages::pull_inspected_hosted_package(
             name,
             owner_handle.as_deref(),
-            None,
+            source_id.as_deref(),
             version.as_deref(),
+            version_id.as_deref(),
         )
         .await
         {
@@ -328,6 +352,22 @@ pub async fn run(projects_m: &ArgMatches) -> bool {
                 return false;
             }
         },
+        ProjectsCommand::Rename { source_id, name } => {
+            match infra_api::account::projects::rename_project(
+                INFRA_BASE_URL,
+                access_token_owned.as_str(),
+                source_id,
+                name,
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(error) => {
+                    eprintln!("x Rename failed: {error}");
+                    return false;
+                }
+            }
+        }
         ProjectsCommand::Visibility { name, is_public } => {
             match infra_api::account::projects::set_project_visibility(
                 INFRA_BASE_URL,
@@ -420,15 +460,10 @@ pub async fn run(projects_m: &ArgMatches) -> bool {
                             .as_ref()
                             .expect("publish payload should be prepared");
 
-                        match infra_api::account::projects::publish_project(
+                        match transmit_publish_payload(
                             INFRA_BASE_URL,
                             retry_access_token.as_str(),
-                            payload.project_name.as_str(),
-                            payload.project_version.as_str(),
-                            payload.package_manifest.clone(),
-                            payload.package_sha256.as_str(),
-                            payload.package_size_bytes,
-                            payload.package_archive_base64.as_str(),
+                            payload,
                         )
                         .await
                         {
@@ -440,17 +475,18 @@ pub async fn run(projects_m: &ArgMatches) -> bool {
                         }
                     }
                     ProjectsCommand::Pull {
+                        source_id,
+                        version_id,
                         name,
                         owner_handle,
                         version,
                         ..
-                    } => match infra_api::account::projects::pull_project(
-                        INFRA_BASE_URL,
-                        retry_access_token.as_str(),
+                    } => match crate::commands::local_packages::pull_inspected_hosted_package(
                         name,
                         owner_handle.as_deref(),
-                        None,
+                        source_id.as_deref(),
                         version.as_deref(),
+                        version_id.as_deref(),
                     )
                     .await
                     {
@@ -460,6 +496,22 @@ pub async fn run(projects_m: &ArgMatches) -> bool {
                             return false;
                         }
                     },
+                    ProjectsCommand::Rename { source_id, name } => {
+                        match infra_api::account::projects::rename_project(
+                            INFRA_BASE_URL,
+                            retry_access_token.as_str(),
+                            source_id,
+                            name,
+                        )
+                        .await
+                        {
+                            Ok(result) => result,
+                            Err(error) => {
+                                eprintln!("x Rename failed: {error}");
+                                return false;
+                            }
+                        }
+                    }
                     ProjectsCommand::Visibility { name, is_public } => {
                         match infra_api::account::projects::set_project_visibility(
                             INFRA_BASE_URL,
@@ -502,6 +554,7 @@ pub async fn run(projects_m: &ArgMatches) -> bool {
     }
 
     if let ProjectsCommand::Pull {
+        source_id,
         name,
         owner_handle,
         version,
@@ -513,16 +566,25 @@ pub async fn run(projects_m: &ArgMatches) -> bool {
         if is_project_pull_success(&response) {
             if let Err(error) = validate_project_pull_response_matches_request(
                 &response,
-                name,
+                if source_id.is_some() { "" } else { name },
                 owner_handle.as_deref(),
                 version.as_deref(),
             ) {
                 eprintln!("x {error}");
                 return false;
             }
+            let resolved_name = response["project"].as_str().unwrap_or(name);
+            if resolved_name.is_empty()
+                || !resolved_name
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+            {
+                eprintln!("x Invalid package name in hosted response.");
+                return false;
+            }
             let output_path = output_dir
                 .clone()
-                .unwrap_or_else(|| PathBuf::from(name.clone()));
+                .unwrap_or_else(|| PathBuf::from(resolved_name));
 
             if let Err(error) = restore_pulled_project(&response, &output_path, *force) {
                 eprintln!("x {error}");
@@ -554,6 +616,37 @@ pub async fn run(projects_m: &ArgMatches) -> bool {
         .and_then(|v| v.as_str())
         .map(|status| status.eq_ignore_ascii_case("success"))
         .unwrap_or(false)
+}
+
+#[cfg(feature = "developer-tools")]
+async fn transmit_publish_payload(
+    base_url: &str,
+    token: &str,
+    payload: &PublishPayload,
+) -> Result<Value, String> {
+    let response = infra_api::account::projects::publish_project(
+        base_url,
+        token,
+        &payload.project_name,
+        &payload.project_version,
+        payload.package_manifest.clone(),
+        &payload.package_sha256,
+        payload.package_size_bytes,
+        &payload.package_archive_base64,
+        &payload.request_id,
+        payload.hosted_source_id.as_deref(),
+    )
+    .await?;
+    if response["status"] == "success" {
+        crate::commands::package_publication::record_terminal(
+            &payload.receipt_root,
+            &payload.request_id,
+            &payload.project_version,
+            &payload.package_sha256,
+            &response,
+        )?;
+    }
+    Ok(response)
 }
 
 #[cfg(feature = "developer-tools")]
@@ -631,7 +724,7 @@ fn finish_publish_payload(
     );
     println!();
 
-    if estimated_request_size_bytes > SAFE_PROJECT_PUBLISH_REQUEST_LIMIT_BYTES {
+    if estimated_request_size_bytes.saturating_add(512) > SAFE_PROJECT_PUBLISH_REQUEST_LIMIT_BYTES {
         return Err(format!(
             "Estimated publish request size {} exceeds the current safe package-publish ceiling of about {}. Keep packaged assets minimal and remove large sample files before publishing.",
             format_bytes(estimated_request_size_bytes),
@@ -640,6 +733,9 @@ fn finish_publish_payload(
     }
 
     Ok(PublishPayload {
+        receipt_root: PathBuf::new(),
+        request_id: String::new(),
+        hosted_source_id: None,
         project_name,
         project_version,
         package_manifest: assembled.manifest_value,
@@ -679,12 +775,13 @@ pub(crate) fn validate_project_pull_response_matches_request(
     requested_version: Option<&str>,
 ) -> Result<(), String> {
     let resolved_name = response
-        .get("project")
+        .get("display_name")
+        .or_else(|| response.get("project"))
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| "Hosted pull response did not include `project`.".to_string())?;
-    if resolved_name != requested_name {
+    if !requested_name.is_empty() && resolved_name != requested_name {
         return Err(format!(
             "Hosted pull response returned package `{resolved_name}` for requested package `{requested_name}`."
         ));
@@ -864,7 +961,7 @@ fn validate_restored_package_manifest(response: &Value, project_root: &Path) -> 
             "Restored package manifest identity `{manifest_name}` {manifest_version} did not match hosted response identity `{response_name}` {response_version}."
         ));
     }
-    Ok(())
+    crate::commands::package_inspection::validate_archive_manifest(response, project_root)
 }
 
 fn relocate_pulled_package_receipt(project_root: &Path) -> Result<(), String> {
@@ -1396,6 +1493,11 @@ fn append_compressed_archive_entries<W: Write>(
             .to_string_lossy()
             .replace('\\', "/");
 
+        if relative_path == ".cargo-ai/publish-requests"
+            || relative_path.starts_with(".cargo-ai/publish-requests/")
+        {
+            continue;
+        }
         if child_metadata.is_dir() {
             archive_builder
                 .append_dir(relative_path.as_str(), child_path.as_path())
@@ -1982,6 +2084,118 @@ mod tests {
     }
 
     #[cfg(feature = "developer-tools")]
+    #[tokio::test]
+    async fn publication_transport_completes_success_and_preserves_retry_identity() {
+        use std::io::{Read, Write};
+        for scenario in ["initial", "refreshed", "lost"] {
+            let root = temp_dir(scenario);
+            fs::create_dir_all(&root).unwrap();
+            let digest = "a".repeat(64);
+            let id = crate::commands::package_publication::request_id(
+                &root, "demo", "1.0.0", &digest, None,
+            )
+            .unwrap();
+            let payload = super::PublishPayload {
+                receipt_root: root.clone(),
+                request_id: id.clone(),
+                hosted_source_id: None,
+                project_name: "demo".into(),
+                project_version: "1.0.0".into(),
+                package_manifest: serde_json::json!({}),
+                package_sha256: digest.clone(),
+                package_size_bytes: 1,
+                package_archive_base64: "YQ==".into(),
+            };
+            let success = serde_json::json!({"status":"success", "hosted_source_id":"source-id",
+                "hosted_version_id":"version-id", "project_version":"1.0.0", "package_sha256":digest});
+            let responses = match scenario {
+                "refreshed" => vec![
+                    Some(serde_json::json!({"status":"error", "type":"access_token_expired"})),
+                    Some(success),
+                ],
+                "lost" => vec![None, Some(success)],
+                _ => vec![Some(success)],
+            };
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            let server = std::thread::spawn(move || {
+                let mut received = Vec::new();
+                for response in responses {
+                    let (mut socket, _) = listener.accept().unwrap();
+                    socket
+                        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                        .unwrap();
+                    let mut raw = Vec::new();
+                    let (start, length) = loop {
+                        let mut byte = [0];
+                        socket.read_exact(&mut byte).unwrap();
+                        raw.push(byte[0]);
+                        if raw.ends_with(b"\r\n\r\n") {
+                            let headers = String::from_utf8(raw.clone()).unwrap();
+                            let length = headers
+                                .lines()
+                                .find_map(|line| {
+                                    let (key, value) = line.split_once(':')?;
+                                    key.eq_ignore_ascii_case("content-length")
+                                        .then(|| value.trim().parse::<usize>().unwrap())
+                                })
+                                .unwrap();
+                            break (raw.len(), length);
+                        }
+                    };
+                    raw.resize(start + length, 0);
+                    socket.read_exact(&mut raw[start..]).unwrap();
+                    received
+                        .push(serde_json::from_slice::<serde_json::Value>(&raw[start..]).unwrap());
+                    if let Some(value) = response {
+                        let body = serde_json::to_string(&value).unwrap();
+                        write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+                    }
+                }
+                received
+            });
+            let first =
+                super::transmit_publish_payload(&url, "isolated-first-token", &payload).await;
+            let terminal = root
+                .join(".cargo-ai/publish-requests")
+                .join(format!("{id}.completed.json"));
+            if scenario != "initial" {
+                if scenario == "lost" {
+                    assert!(first.is_err());
+                } else {
+                    assert_eq!(first.unwrap()["type"], "access_token_expired");
+                }
+                assert!(!terminal.exists());
+                assert_eq!(
+                    crate::commands::package_publication::request_id(
+                        &root, "demo", "1.0.0", &digest, None
+                    )
+                    .unwrap(),
+                    id
+                );
+                super::transmit_publish_payload(&url, "isolated-retry-token", &payload)
+                    .await
+                    .unwrap();
+            } else {
+                assert_eq!(first.unwrap()["status"], "success");
+            }
+            assert!(terminal.is_file());
+            assert_ne!(
+                crate::commands::package_publication::request_id(
+                    &root, "demo", "1.0.0", &digest, None
+                )
+                .unwrap(),
+                id
+            );
+            let requests = server.join().unwrap();
+            for request in requests {
+                assert_eq!(request["projects"]["publish"]["publish_request_id"], id);
+            }
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[cfg(feature = "developer-tools")]
     #[test]
     fn publish_staging_is_removed_after_post_assembly_validation_errors() {
         for (stem, project_name, project_version, expected_error) in [
@@ -2090,6 +2304,7 @@ mod tests {
             "hosted_version_id": "version-id",
             "package_sha256": sha256_hex(archive_bytes),
             "package_size_bytes": archive_bytes.len(),
+            "package_manifest": {"format_version": 1, "project_name": project_name, "project_version": project_version},
             "package_archive_base64": base64::engine::general_purpose::STANDARD.encode(archive_bytes)
         })
     }
@@ -2107,6 +2322,27 @@ mod tests {
         )
         .expect("package manifest should be writable");
         fs::write(root.join("assets/new.txt"), "new").expect("package asset should be writable");
+    }
+
+    #[test]
+    fn forced_pull_rejects_matching_identity_with_changed_embedded_declarations() {
+        let source = temp_dir("manifest-binding-source");
+        let output = temp_dir("manifest-binding-output");
+        write_pull_source(&source, "demo");
+        let archive = create_package_archive_bytes(&source).unwrap();
+        let mut response = hosted_pull_response(&archive, "demo", "1.0.0");
+        response["package_manifest"]["permissions"] = serde_json::json!({"subprocess":"allowed"});
+        fs::create_dir_all(&output).unwrap();
+        fs::write(output.join("sentinel"), "preserve").unwrap();
+        let error = restore_pulled_project(&response, &output, true).unwrap_err();
+        assert!(error.contains("archive manifest differs"), "{error}");
+        assert_eq!(
+            fs::read_to_string(output.join("sentinel")).unwrap(),
+            "preserve"
+        );
+        assert!(!output.join("assets/new.txt").exists());
+        fs::remove_dir_all(source).unwrap();
+        fs::remove_dir_all(output).unwrap();
     }
 
     #[test]
@@ -2488,7 +2724,8 @@ project_version = "1.2.3"
         .expect("restored manifest should be writable");
         let matching = serde_json::json!({
             "project": "demo",
-            "project_version": "1.2.3"
+            "project_version": "1.2.3",
+            "package_manifest": {"format_version": 1, "project_name": "demo", "project_version": "1.2.3"}
         });
         validate_restored_package_manifest(&matching, &root)
             .expect("matching restored manifest should pass");

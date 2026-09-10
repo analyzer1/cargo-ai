@@ -3,6 +3,11 @@ use clap::ArgMatches;
 
 /// Routes package management commands.
 pub async fn run(sub_m: &ArgMatches) -> bool {
+    if let Some(inspect) = sub_m.subcommand_matches("inspect") {
+        if inspect.get_one::<String>("account").is_some() {
+            return crate::commands::package_inspection::run(inspect).await;
+        }
+    }
     if let Some(list_m) = sub_m.subcommand_matches("list") {
         if crate::commands::local_packages::account_handle_from_list_matches(list_m).is_some() {
             return crate::commands::account::run_packages(sub_m).await;

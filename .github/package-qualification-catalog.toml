@@ -1,5 +1,5 @@
 schema_version = 1
-official_package_count = 0
+official_package_count = 1
 
 [[qualification_canaries]]
 package_id = "qualification_canary"
@@ -13,3 +13,13 @@ revision = "b803c21e692bc249c23a3f50fdf18e0cf7ae460e"
 
 # Official packages are added only after their repositories own a bounded
 # qualification declaration and an exact reviewed enrollment revision.
+
+[[official_packages]]
+pr_canary = false
+package_id = "animal_patrol"
+repository = "cargo-ai/cargo-ai"
+revision = "612b082fa50e0c672a59e67ff09de909cbd28807"
+declaration_path = "examples/animal-patrol/cargo-ai-qualification.toml"
+platforms = ["ubuntu-latest", "macos-latest", "windows-latest"]
+enabled = true
+release_required = true

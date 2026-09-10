@@ -3,3 +3,5 @@
 /.cargo-ai 
 .tmp.*
 AGENTS.md
+# Local publication request identities are never part of public source.
+**/.cargo-ai/publish-requests/

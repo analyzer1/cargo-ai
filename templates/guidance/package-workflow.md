@@ -71,6 +71,14 @@ Bare package names without `--account` are local-only. They must not trigger net
 
 ## Hosted Packages
 
+Use `cargo ai packages inspect NAME --account HANDLE` for metadata-only hosted inspection, or `cargo ai packages inspect --account --source-id SOURCE_ID --version-id VERSION_ID --json` for an exact immutable snapshot. Bare `packages inspect ALIAS` remains installed/local-only. A source ID identifies its owner: do not combine it with a handle. An exact version ID requires the source ID and conflicts with semantic `--version`.
+
+The same source/version selectors work with `packages install --account ... --as ALIAS` and `packages pull ...`. Install/pull bind downloaded identity, digest, size and manifest to the inspected snapshot before materialization. Preserve the existing four permission controls and require acceptance of newly enabled subprocess execution. Description, licenses, source claims and dynamic-effect descriptions are publisher declarations, not authority. Optional versioned inspection metadata includes checked file inventories; older format-1 packages explicitly lack it. Unknown effects are not evidence of safety.
+
+Service-returned source and exact-version references open a read-only public inspection page with copyable commands. No URL-direct install or executable preview is supported. Private, archived and missing public references are uniformly unavailable and uncacheable. `packages rename --source-id SOURCE_ID --name NEW_NAME` changes only the owner's hosted display name; stable references and historical bytes remain unchanged. Publish later versions with `packages publish --source-id SOURCE_ID` when appropriate.
+
+Publication writes credential-free pending request receipts under `.cargo-ai/publish-requests/` before transmission and records the terminal immutable identity after confirmation. Preserve receipts across unknown outcomes and retry unchanged inputs; a timeout does not prove rollback. Receipts are excluded from packages/archives and must stay out of source control. Different content cannot replace a completed immutable version. Hosting credentials never become package/runtime-provider credentials.
+
 ```bash
 # Hosted listings
 cargo ai packages list --account

@@ -128,6 +128,8 @@ struct PackageManifestDocument {
     assets: Vec<String>,
     #[serde(default)]
     permissions: PackagePermissionProfileDocument,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    inspection: Option<super::package_metadata::InspectionMetadata>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -515,6 +517,30 @@ fn assemble_package_root(
         package_dependencies,
     )?;
 
+    let publisher = super::package_metadata::PublisherStatements {
+        description: project_identity
+            .and_then(|p| p.extra.get("description"))
+            .and_then(toml::Value::as_str)
+            .map(str::to_string),
+        license: project_identity
+            .and_then(|p| p.extra.get("license"))
+            .and_then(toml::Value::as_str)
+            .map(str::to_string),
+        source_revision: project_identity
+            .and_then(|p| p.extra.get("source_revision"))
+            .and_then(toml::Value::as_str)
+            .map(str::to_string),
+    };
+    let inspection = super::package_metadata::generate(
+        &output_root.path,
+        publisher,
+        &package_permissions.subprocess,
+        build_profile
+            .agent_definitions
+            .iter()
+            .chain(&build_profile.hatched_agents)
+            .cloned(),
+    )?;
     let manifest = PackageManifestDocument {
         format_version: 1,
         project_name: project_identity.and_then(|project| project.name.clone()),
@@ -525,6 +551,7 @@ fn assemble_package_root(
         tools: build_profile.tools.clone(),
         assets: build_profile.assets.clone(),
         permissions: package_permissions.clone(),
+        inspection: Some(inspection),
     };
     write_package_manifest(output_root.path.as_path(), &manifest)?;
 
@@ -1029,6 +1056,12 @@ fn copy_declared_path(
 }
 
 fn copy_file(project_root: &Path, source: &Path, dest: &Path) -> Result<(), String> {
+    if source
+        .strip_prefix(project_root)
+        .is_ok_and(|path| path.starts_with(".cargo-ai/publish-requests"))
+    {
+        return Err("Publication request receipts cannot be packaged.".into());
+    }
     let metadata = validate_project_source_path(project_root, source, "Packaged file")?;
     if !metadata.is_file() {
         return Err(format!(
@@ -1717,6 +1750,7 @@ assets = ["assets/prompts/"]
                 tools: vec!["hello_tool".to_string()],
                 assets: vec!["assets/prompts/".to_string()],
                 permissions: allowed_permissions.clone(),
+                inspection: manifest.inspection.clone(),
             }
         );
 
