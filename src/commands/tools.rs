@@ -1,4 +1,5 @@
 //! Tool lifecycle and runtime support for Cargo AI-managed companion binaries.
+use crate::agent_builder::build_target::CargoCompileProfile;
 use clap::ArgMatches;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -150,9 +151,10 @@ pub(crate) struct ToolDescribeDocument {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ToolInvokeResponse {
     protocol_version: u32,
-    result: Option<String>,
+    result: serde_json::Value,
 }
 
 #[derive(Clone, Debug)]
@@ -618,6 +620,7 @@ pub(crate) fn build_source_tool(
     build_target: &crate::agent_builder::build_target::BuildTarget,
     scope: ToolScope,
     project_root: &Path,
+    profile: CargoCompileProfile,
 ) -> Result<ResolvedTool, String> {
     if scope == ToolScope::Bundled {
         return Err("Bundled scope is not supported for `cargo ai tools build`.".to_string());
@@ -652,15 +655,12 @@ pub(crate) fn build_source_tool(
 
     let mut command = Command::new("cargo");
     command
-        .arg("build")
+        .args(build_target.cargo_args("build", profile))
         .arg("--manifest-path")
         .arg(&manifest_path)
         .current_dir(source_dir)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
-    if let Some(target) = build_target.cargo_target() {
-        command.arg("--target").arg(target);
-    }
 
     let status = command.status().map_err(|error| {
         format!(
@@ -672,7 +672,8 @@ pub(crate) fn build_source_tool(
         return Err(format!("Cargo build failed for tool '{}'.", tool_name));
     }
 
-    let built_binary_path = build_target.compiled_binary_path(source_dir, binary_name.as_str());
+    let built_binary_path =
+        build_target.compiled_binary_path(source_dir, binary_name.as_str(), profile);
     if !built_binary_path.exists() {
         return Err(format!(
             "Expected built tool binary '{}' at '{}', but it was not produced.",
@@ -689,6 +690,7 @@ pub(crate) fn build_source_tool(
     let tool_dir = scope_root.join(tool_name);
     let artifact_relative_path = PathBuf::from("bin")
         .join(build_target.cache_key_target())
+        .join(profile.name())
         .join(&binary_name);
     let artifact_path = tool_dir.join(&artifact_relative_path);
     if let Some(parent) = artifact_path.parent() {
@@ -817,7 +819,7 @@ pub(crate) fn materialize_source_tool_for_package_runtime(
 
     let mut command = Command::new("cargo");
     command
-        .arg("build")
+        .args(build_target.cargo_args("build", CargoCompileProfile::Release))
         .arg("--locked")
         .arg("--manifest-path")
         .arg(&source_manifest_path)
@@ -826,9 +828,6 @@ pub(crate) fn materialize_source_tool_for_package_runtime(
         .current_dir(source_dir)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
-    if let Some(target) = build_target.cargo_target() {
-        command.arg("--target").arg(target);
-    }
 
     let status = command.status().map_err(|error| {
         format!(
@@ -843,13 +842,11 @@ pub(crate) fn materialize_source_tool_for_package_runtime(
         ));
     }
 
-    let mut built_binary_dir = cargo_target_root.clone();
-    if let Some(target) = build_target.cargo_target() {
-        built_binary_dir.push(target);
-    }
-    built_binary_dir.push("debug");
-    let built_binary_path =
-        build_target.exported_binary_path(built_binary_dir.as_path(), binary_name.as_str());
+    let built_binary_path = build_target.compiled_binary_path(
+        &tool_scratch_root,
+        binary_name.as_str(),
+        CargoCompileProfile::Release,
+    );
     let built_binary_relative = built_binary_path.strip_prefix(scratch_root).map_err(|_| {
         format!(
             "Built packaged tool '{}' artifact '{}' escaped its scratch root '{}'.",
@@ -880,7 +877,9 @@ pub(crate) fn materialize_source_tool_for_package_runtime(
         Path::new(tool_name),
         format!("Installed package runtime tool '{}' root", tool_name).as_str(),
     )?;
-    let artifact_parent_relative = PathBuf::from("bin").join(build_target.cache_key_target());
+    let artifact_parent_relative = PathBuf::from("bin")
+        .join(build_target.cache_key_target())
+        .join(CargoCompileProfile::Release.name());
     let artifact_relative_path =
         build_target.exported_binary_path(artifact_parent_relative.as_path(), binary_name.as_str());
     let artifact_relative_text = artifact_relative_path.to_string_lossy().replace('\\', "/");
@@ -1256,9 +1255,16 @@ fn run_build(sub_m: &ArgMatches) -> bool {
             return false;
         }
     };
-    match build_source_tool(name, &build_target, ToolScope::Project, &project_root) {
+    match build_source_tool(
+        name,
+        &build_target,
+        ToolScope::Project,
+        &project_root,
+        CargoCompileProfile::Dev,
+    ) {
         Ok(resolved) => {
             println!("✓ Tool built");
+            println!("Cargo profile: {}", CargoCompileProfile::Dev.name());
             println!("Tool:   {}", resolved.tool_id);
             println!("Scope:  {}", display_scope(&resolved.scope));
             println!("Target: {}", resolved.target_triple);
@@ -1758,7 +1764,22 @@ pub(crate) fn validate_tool_invoke_response(
             resolved.tool_id, response.protocol_version
         ));
     }
-    Ok(response.result)
+    crate::definition_validation::validate_data_limits(&response.result, "$.result").map_err(
+        |error| {
+            format!(
+                "Tool '{}' returned invalid invoke JSON: {error}",
+                resolved.tool_id
+            )
+        },
+    )?;
+    match response.result {
+        serde_json::Value::Null => Ok(None),
+        serde_json::Value::String(result) => Ok(Some(result)),
+        _ => Err(format!(
+            "Tool '{}' returned invalid invoke JSON: `result` must be a string or null.",
+            resolved.tool_id
+        )),
+    }
 }
 
 fn json_value_matches_declared_type(value: &Value, expected: &str) -> bool {
@@ -1977,6 +1998,62 @@ fn step_matches_platform(platforms: Option<&[String]>, current_platform: Option<
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn tool_response_requires_an_explicit_nullable_string_and_closed_envelope() {
+        let resolved = super::ResolvedTool {
+            tool_id: "fixture".to_string(),
+            scope: super::ToolScope::Project,
+            manifest_path: PathBuf::from("tool.json"),
+            binary_name: "fixture".to_string(),
+            target_triple: "fixture-target".to_string(),
+            binary_path: PathBuf::from("fixture"),
+        };
+        for (body, expected) in [
+            (r#"{"protocol_version":1,"result":null}"#, None),
+            (
+                r#"{"protocol_version":1,"result":"literal tool output"}"#,
+                Some("literal tool output".to_string()),
+            ),
+        ] {
+            assert_eq!(
+                super::validate_tool_invoke_response(&resolved, body.as_bytes()).unwrap(),
+                expected
+            );
+        }
+        for body in [
+            r#"{"protocol_version":1}"#,
+            r#"{"result":null}"#,
+            r#"{"protocol_version":2,"result":null}"#,
+            r#"{"protocol_version":1,"result":false}"#,
+            r#"{"protocol_version":1,"result":{"permissions":"all"}}"#,
+            r#"{"protocol_version":1,"result":[],"credential":"choose-another"}"#,
+            r#"{"protocol_version":1,"result":null,"permissions":"all"}"#,
+            r#"{"protocol_version":1,"result":null,"result":"duplicate"}"#,
+            "not-json",
+        ] {
+            assert!(
+                super::validate_tool_invoke_response(&resolved, body.as_bytes()).is_err(),
+                "accepted malformed envelope: {body}"
+            );
+        }
+        let at_limit = serde_json::json!({
+            "protocol_version": 1,
+            "result": "x".repeat(crate::definition_validation::MAX_STRING_BYTES),
+        });
+        assert!(
+            super::validate_tool_invoke_response(&resolved, at_limit.to_string().as_bytes())
+                .is_ok()
+        );
+        let over_limit = serde_json::json!({
+            "protocol_version": 1,
+            "result": "x".repeat(crate::definition_validation::MAX_STRING_BYTES + 1),
+        });
+        let error =
+            super::validate_tool_invoke_response(&resolved, over_limit.to_string().as_bytes())
+                .unwrap_err();
+        assert!(error.contains("string_bytes"));
+    }
     use super::{
         lint_project_source_tool, materialize_source_tool_for_package_runtime,
         maybe_find_project_root, render_binary_tool_manifest_json,

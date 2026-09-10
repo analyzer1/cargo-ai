@@ -59,7 +59,7 @@ If that model is not available to your plan, choose another current model expose
 
 ```json
 {
-  "agent_definition_schema_version": "2026-03-03.r1",
+  "agent_definition_schema_version": "2026-09-09.r1",
   "inputs": [
     {
       "type": "text",
@@ -170,6 +170,8 @@ cargo ai add guidance --style codex
 ```
 
 Use `--style claude` for Claude Code, or repeat `--style` to install both discovery entrypoints. The installed `.cargo-ai/guidance/` bundle is self-contained and is the authoritative offline authoring contract for that Cargo AI version.
+
+Use `cargo ai guidance status` for a read-only ownership/version check and `cargo ai guidance update` for an explicit offline update from the installed binary. User-owned instructions are preserved. See [guided setup](./docs/getting-started.md#author-with-an-ai-coding-assistant) and [guidance maintenance](./docs/projects-and-tools.md#maintain-assistant-guidance).
 
 Projects can add local Rust tools, explicit build profiles, package metadata, assets, and runtime defaults. Start with [Projects and local tools](./docs/projects-and-tools.md), then use [Packages](./docs/packages.md) when the workflow should be installed, versioned, or shared.
 

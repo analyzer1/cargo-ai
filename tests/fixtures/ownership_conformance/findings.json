@@ -1,0 +1,7 @@
+{
+  "location": "north gate",
+  "findings": [
+    {"animal": "deer", "count": 2, "confidence": 0.9, "note": "near gate, \"east\""},
+    {"animal": "fox", "count": 1, "confidence": 0.75, "note": null}
+  ]
+}

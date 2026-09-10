@@ -8,6 +8,8 @@ mod cargo_ai_metadata;
 mod commands;
 mod config;
 mod credentials;
+#[path = "../templates/definition_validation.rs"]
+mod definition_validation;
 mod infra_api;
 mod providers;
 mod runtime_definition;
@@ -34,9 +36,26 @@ fn should_run_automatic_update_check(
 // Executor: Responsible for polling and running to completion
 #[tokio::main]
 async fn main() {
+    let cmd_args = args::build_cli();
+    // Installed guidance operates only on the selected project. Dispatch it
+    // before home initialization, credential migration or network checks.
+    let guidance_result = if let Some(sub_m) = cmd_args.subcommand_matches("guidance") {
+        Some(commands::add::guidance::run_lifecycle(sub_m))
+    } else {
+        cmd_args
+            .subcommand_matches("add")
+            .and_then(|sub_m| sub_m.subcommand_matches("guidance"))
+            .map(commands::add::guidance::run)
+    };
+    if let Some(succeeded) = guidance_result {
+        if !succeeded {
+            process::exit(1);
+        }
+        return;
+    }
+
     let cargo_ai_home = config::paths::cargo_ai_root();
     let cargo_ai_home_preexisting = cargo_ai_home.exists();
-    let cmd_args = args::build_cli();
     let skip_update_check_for_invocation = cmd_args.get_flag("no_update_check");
     let mut automatic_persistence_allowed = true;
 

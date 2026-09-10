@@ -6,13 +6,22 @@ use std::fs;
 use std::io::{Error, ErrorKind};
 use std::path::{Path, PathBuf};
 
-use crate::agent_builder::build_target::BuildTarget;
+use crate::agent_builder::build_target::{BuildTarget, CargoCompileProfile};
 
 /// Execution mode for hatch pipeline.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum HatchMode {
     Build,
     Check,
+}
+
+impl HatchMode {
+    fn compile_profile(self) -> CargoCompileProfile {
+        match self {
+            Self::Build => CargoCompileProfile::Release,
+            Self::Check => CargoCompileProfile::Dev,
+        }
+    }
 }
 
 #[cfg_attr(not(feature = "developer-tools"), allow(dead_code))]
@@ -200,10 +209,12 @@ where
         return false;
     }
 
+    let profile = mode.compile_profile();
     let mut template_preparation_started = false;
     let warmed_template =
         match crate::agent_builder::template_cache::ensure_warmed_template_with_prepare_hook(
             &build_target,
+            profile,
             || {
                 template_preparation_started = true;
                 println!("First run may take longer while the build template is prepared.");
@@ -412,6 +423,10 @@ fn render_hatch_success_lines(summary: &HatchRunSummary) -> Vec<String> {
     }
 
     let mut build_items = vec![
+        (
+            "Cargo profile",
+            summary.mode.compile_profile().name().to_string(),
+        ),
         (
             "Template",
             template_status_label(summary.template_status).to_string(),
@@ -762,13 +777,14 @@ mod tests {
 
         let rendered = lines.join("\n");
         assert!(rendered.contains("✓ Agent hatched"));
+        assert!(rendered.contains("Cargo profile  release"));
         assert!(rendered.contains("Built local agent `weather_test`."));
         assert!(rendered.contains("Type  Registry"));
         assert!(rendered.contains("Name  weather_test"));
         assert!(rendered.contains("Binary  `./weather_test`"));
         assert!(rendered.contains("Target  aarch64-apple-darwin"));
-        assert!(rendered.contains("Template   Reused warmed template"));
-        assert!(rendered.contains("Workspace  Removed"));
+        assert!(rendered.contains("Template       Reused warmed template"));
+        assert!(rendered.contains("Workspace      Removed"));
         assert!(rendered.contains("Run agent  `./weather_test --help`"));
     }
 
@@ -790,15 +806,16 @@ mod tests {
 
         let rendered = lines.join("\n");
         assert!(rendered.contains("✓ Agent checked"));
+        assert!(rendered.contains("Cargo profile  dev"));
         assert!(rendered.contains(
             "Checked local agent `weather_local` from account definition `weather_remote`."
         ));
         assert!(rendered.contains("Owner  self"));
         assert!(rendered.contains("Agent  weather_remote"));
         assert!(rendered.contains("Path   /"));
-        assert!(rendered.contains("Target     aarch64-apple-darwin"));
-        assert!(rendered.contains("Template   Created warmed template"));
-        assert!(rendered.contains("Workspace  Preserved"));
+        assert!(rendered.contains("Target         aarch64-apple-darwin"));
+        assert!(rendered.contains("Template       Created warmed template"));
+        assert!(rendered.contains("Workspace      Preserved"));
         assert!(!rendered.contains("\nOutput\n"));
         assert!(!rendered.contains("\nNext steps\n"));
     }

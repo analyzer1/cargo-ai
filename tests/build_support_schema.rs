@@ -6,6 +6,28 @@ mod build_support;
 
 use sha2::{Digest, Sha256};
 
+#[path = "support/definition_validation_cases.rs"]
+mod boundary_cases;
+
+fn generate_with_strict_parity(raw: &str) -> Result<String, build_support::BuildError> {
+    let legacy = build_support::generate_agent_model_from_str(raw);
+    if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(raw) {
+        if let Some(root) = value.as_object_mut() {
+            root.insert(
+                "agent_definition_schema_version".into(),
+                serde_json::json!("2026-09-09.r1"),
+            );
+            let strict = build_support::generate_agent_model_from_str(&value.to_string());
+            assert_eq!(
+                legacy.is_ok(),
+                strict.is_ok(),
+                "legacy/strict disposition drift: {strict:?}\n{raw}"
+            );
+        }
+    }
+    legacy
+}
+
 fn absolute_test_path(file_name: &str) -> String {
     let path = std::env::temp_dir().join(file_name);
     assert!(path.is_absolute());
@@ -98,7 +120,7 @@ fn config_with_optional_inputs_and_action_execution(
 fn accepts_schema_backed_agents_without_baked_inputs() {
     let cfg = config_with_optional_inputs(r#""answer": { "type": "integer" }"#, "", "[]", None);
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert!(generated.contains("pub fn inputs() -> Vec<Input> {\n    vec![]\n}"));
     assert!(generated.contains("pub fn has_output_schema_properties() -> bool {\n    true\n}"));
@@ -118,7 +140,7 @@ fn accepts_structural_action_only_agents_without_inputs() {
         None,
     );
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert!(generated.contains("pub fn inputs() -> Vec<Input> {\n    vec![]\n}"));
     assert!(generated.contains("pub fn has_output_schema_properties() -> bool {\n    false\n}"));
@@ -134,7 +156,7 @@ fn emits_parallel_action_execution_when_declared() {
         Some("parallel"),
     );
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert!(generated.contains(
         "pub fn action_execution() -> ActionExecutionMode {\n    ActionExecutionMode::Parallel\n}"
@@ -151,9 +173,7 @@ fn rejects_invalid_action_execution_values() {
         Some("fanout"),
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.action_execution"));
     assert!(err.contains("expected `sequential` or `parallel`"));
@@ -188,7 +208,7 @@ fn accepts_named_inputs_when_schema_properties_are_empty() {
         ),
     );
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert!(generated.contains(
         "Input { name: Some(\"menu_image\".to_string()), kind: InputKind::Image, value: Some(\"./artifacts/menu.png\".to_string()) }"
@@ -213,9 +233,7 @@ fn rejects_unnamed_inputs_when_schema_properties_are_empty() {
         ),
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.inputs[0].name"));
     assert!(err.contains("must declare `name`"));
@@ -248,9 +266,7 @@ fn rejects_unknown_named_child_input_reference() {
         ),
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].inputs[0].input"));
     assert!(err.contains("unknown named top-level input `missing_input`"));
@@ -272,7 +288,7 @@ fn accepts_top_level_array_fields_and_arrays_of_objects() {
         "[]",
     );
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert!(generated.contains("pub rows: serde_json::Value,"));
     assert!(generated.contains(r#"apply_property_schema_override("#));
@@ -296,7 +312,7 @@ fn accepts_nullable_scalar_object_properties_inside_structured_fields() {
         "[]",
     );
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert!(generated.contains(r#"\"discount\":{\"type\":[\"number\",\"null\"]}"#));
 }
@@ -311,9 +327,7 @@ fn rejects_nested_arrays_with_actionable_path() {
         "[]",
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.agent_schema.properties.matrix.items.type"));
     assert!(err.contains("nested arrays are not supported in this story"));
@@ -336,9 +350,7 @@ fn rejects_nested_object_properties_inside_structured_fields() {
         "[]",
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.agent_schema.properties.payload.properties.nested.type"));
     assert!(err.contains(
@@ -353,7 +365,7 @@ fn preserves_description_in_generated_schema_metadata() {
         "[]",
     );
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert!(generated.contains(r#"apply_property_schema_override("#));
     assert!(generated.contains(r#"\"description\":\"The numeric answer.\""#));
@@ -363,7 +375,7 @@ fn preserves_description_in_generated_schema_metadata() {
 fn preserves_string_enum_in_generated_schema_and_runtime_validation() {
     let cfg = config_with(r#""unit": { "type": "string", "enum": ["F", "C"] }"#, "[]");
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert!(generated.contains(r#"validate_schema_field("#));
     assert!(generated.contains(r#"\"enum\":[\"F\",\"C\"]"#));
@@ -376,9 +388,7 @@ fn rejects_non_string_enum_fields() {
         "[]",
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.agent_schema.properties.score.enum"));
     assert!(err.contains("`enum` is supported only for `type: \"string\"` fields"));
@@ -395,7 +405,7 @@ fn preserves_numeric_bounds_in_generated_schema_and_runtime_validation() {
         "[]",
     );
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert!(generated.contains(r#"\"minimum\":0"#));
     assert!(generated.contains(r#"\"exclusiveMaximum\":1"#));
@@ -413,7 +423,7 @@ fn preserves_integer_bounds_in_generated_schema_and_runtime_validation() {
         "[]",
     );
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert!(generated.contains(r#"\"minimum\":1"#));
     assert!(generated.contains(r#"\"maximum\":3"#));
@@ -431,9 +441,7 @@ fn rejects_conflicting_numeric_lower_bounds() {
         "[]",
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.agent_schema.properties.confidence.exclusiveMinimum"));
     assert!(err.contains("cannot be combined with `minimum`"));
@@ -443,9 +451,7 @@ fn rejects_conflicting_numeric_lower_bounds() {
 fn rejects_top_level_nullable_fields() {
     let cfg = config_with(r#""value": { "type": ["string", "null"] }"#, "[]");
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.agent_schema.properties.value.type"));
     assert!(err.contains("union schema types are not supported yet"));
@@ -455,9 +461,7 @@ fn rejects_top_level_nullable_fields() {
 fn rejects_union_types_with_actionable_path() {
     let cfg = config_with(r#""value": { "type": ["string", "integer"] }"#, "[]");
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.agent_schema.properties.value.type"));
     assert!(err.contains("union schema types are not supported yet"));
@@ -467,9 +471,7 @@ fn rejects_union_types_with_actionable_path() {
 fn rejects_invalid_field_identifiers() {
     let cfg = config_with(r#""bad-name": { "type": "string" }"#, "[]");
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.agent_schema.properties.bad-name"));
     assert!(err.contains("must contain only ASCII letters, digits, or underscores"));
@@ -479,9 +481,7 @@ fn rejects_invalid_field_identifiers() {
 fn rejects_reserved_runtime_top_level_output_field_name() {
     let cfg = config_with(r#""runtime": { "type": "string" }"#, "[]");
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.agent_schema.properties.runtime"));
     assert!(err.contains("`runtime` is reserved"));
@@ -500,7 +500,7 @@ fn emits_runtime_var_specs_for_declared_runtime_vars() {
         "[]",
     );
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert!(generated.contains("pub enum RuntimeVarType"));
     assert!(generated.contains("pub struct RuntimeVarSpec"));
@@ -518,9 +518,7 @@ fn rejects_runtime_var_default_type_mismatch() {
         "[]",
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.runtime_vars.generate_images.default"));
     assert!(err.contains("default must be a boolean"));
@@ -550,7 +548,7 @@ fn accepts_runtime_vars_in_logic_when_and_substitution_surfaces() {
         ]"#,
     );
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert!(generated.contains(r#"RunArg::Variable("runtime.report_suffix".to_string())"#));
     assert!(generated.contains(r#"generated step `when` must be valid JSON"#));
@@ -560,9 +558,7 @@ fn accepts_runtime_vars_in_logic_when_and_substitution_surfaces() {
 fn rejects_reserved_keyword_field_identifiers() {
     let cfg = config_with(r#""union": { "type": "string" }"#, "[]");
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.agent_schema.properties.union"));
     assert!(err.contains("reserved Rust keyword"));
@@ -583,9 +579,7 @@ fn rejects_unsupported_action_kind_with_actionable_path() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].kind"));
     assert!(err.contains("supported: `exec`, `email_me`, `agent`, `tool`, `generate_image`"));
@@ -610,7 +604,7 @@ fn accepts_mixed_literal_and_variable_action_args() {
         ]"#,
     );
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert!(generated.contains("RunArg::Literal(\"value=\".to_string())"));
     assert!(generated.contains("RunArg::Variable(\"value\".to_string())"));
@@ -635,7 +629,7 @@ fn accepts_email_me_string_and_variable_parts() {
         ]"#,
     );
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert!(generated.contains("kind: \"email_me\".to_string()"));
     assert!(generated.contains("subject: Some(vec![RunArg::Literal(\"Weather alert for \".to_string()), RunArg::Variable(\"city\".to_string())])"));
@@ -662,7 +656,7 @@ fn accepts_generate_image_step_with_prompt_and_path_parts() {
         ]"#,
     );
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert!(generated.contains("kind: \"generate_image\".to_string()"));
     assert!(generated.contains("model: Some(RunArg::Literal(\"gpt-image-1\".to_string()))"));
@@ -695,9 +689,7 @@ fn rejects_generate_image_output_variable() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].output_variable"));
     assert!(err.contains("`output_variable` is only supported for `exec` and `tool` actions"));
@@ -723,9 +715,7 @@ fn rejects_generate_image_unsupported_output_extension() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].path"));
     assert!(err.contains("supported extension"));
@@ -758,7 +748,7 @@ fn accepts_generate_image_model_from_runtime_or_schema_string_variables() {
         ]"#,
     );
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert!(generated
         .contains("model: Some(RunArg::Variable(\"runtime.runtime_image_model\".to_string()))"));
@@ -786,9 +776,7 @@ fn rejects_generate_image_model_from_non_string_variable() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].model"));
     assert!(err.contains("must resolve from string fields"));
@@ -820,9 +808,7 @@ fn rejects_generate_image_model_from_captured_variable() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[1].model"));
     assert!(err.contains("unknown variable `image_model`"));
@@ -848,9 +834,7 @@ fn rejects_email_me_program_field() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].program"));
     assert!(err.contains("not supported for `email_me`"));
@@ -875,9 +859,7 @@ fn rejects_empty_email_me_subject_string() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].subject"));
     assert!(err.contains("must be a non-empty string"));
@@ -906,7 +888,7 @@ fn accepts_agent_step_with_relative_path_and_inputs() {
         ]"#,
     );
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert!(generated.contains("kind: \"agent\".to_string()"));
     assert!(generated.contains("agent: Some(\"./summary_agent\".to_string())"));
@@ -948,7 +930,7 @@ fn accepts_agent_step_with_input_overrides() {
         ),
     );
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert!(generated.contains("run_vars: Some(vec!["));
     assert!(generated
@@ -984,9 +966,7 @@ fn rejects_non_object_input_overrides() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].input_overrides"));
     assert!(err.contains("expected `input_overrides` to be an object"));
@@ -1014,9 +994,7 @@ fn rejects_input_overrides_on_exec_steps() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].input_overrides"));
     assert!(err.contains("only supported for `agent` actions"));
@@ -1041,9 +1019,7 @@ fn rejects_agent_input_mode_without_inputs() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].input_mode"));
     assert!(err.contains("requires `inputs`"));
@@ -1069,9 +1045,7 @@ fn rejects_input_mode_on_exec_steps() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].input_mode"));
     assert!(err.contains("only supported for `agent` actions"));
@@ -1097,9 +1071,7 @@ fn rejects_input_mode_on_email_steps() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].input_mode"));
     assert!(err.contains("only supported for `agent` actions"));
@@ -1133,7 +1105,7 @@ fn accepts_dynamic_child_agent_input_parts() {
         ]"#,
     );
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert!(generated.contains(
         "ActionInput::Text { text: vec![RunArg::Literal(\"Summarize for \".to_string()), RunArg::Variable(\"customer\".to_string())] }"
@@ -1173,7 +1145,7 @@ fn accepts_exec_output_variable_for_later_action_inputs() {
         ]"#,
     );
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert!(generated.contains("output_variable: Some(\"report_path\".to_string())"));
     assert!(generated.contains(
@@ -1208,7 +1180,7 @@ fn accepts_step_control_fields_for_later_steps() {
         ]"#,
     );
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert!(generated.contains("status_variable: Some(\"child_status\".to_string())"));
     assert!(generated.contains("error_variable: Some(\"child_error\".to_string())"));
@@ -1238,7 +1210,7 @@ fn accepts_abort_failure_mode_for_run_steps() {
         ]"#,
     );
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert!(generated.contains("failure_mode: Some(FailureMode::Abort)"));
 }
@@ -1269,9 +1241,7 @@ fn rejects_duplicate_output_variable_names_within_one_action() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[1].output_variable"));
     assert!(err.contains("duplicate captured variable name `report_listing`"));
@@ -1297,9 +1267,7 @@ fn rejects_output_variable_name_collisions_with_agent_output_fields() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].output_variable"));
     assert!(err.contains("collides with an agent output field"));
@@ -1330,9 +1298,7 @@ fn rejects_duplicate_status_variable_names_within_one_action() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[1].status_variable"));
     assert!(err.contains("duplicate captured variable name `step_status`"));
@@ -1358,9 +1324,7 @@ fn rejects_status_variable_name_collisions_with_agent_output_fields() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].status_variable"));
     assert!(err.contains("collides with an agent output field"));
@@ -1386,9 +1350,7 @@ fn rejects_reserved_runtime_capture_variable_name() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].status_variable"));
     assert!(err.contains("`runtime` is reserved"));
@@ -1426,7 +1388,7 @@ fn allows_reusing_output_variable_names_in_different_actions() {
         ]"#,
     );
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert_eq!(
         generated
@@ -1467,7 +1429,7 @@ fn allows_reusing_status_variable_names_in_different_actions() {
         ]"#,
     );
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert_eq!(
         generated
@@ -1513,9 +1475,7 @@ fn rejects_cross_action_reference_to_captured_output_variable() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[1].run[0].inputs[0].text[1].var"));
     assert!(err.contains("unknown variable `report_listing`"));
@@ -1553,9 +1513,7 @@ fn rejects_cross_action_reference_to_status_variable() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[1].run[0].when.==[0].var"));
     assert!(err.contains("unknown variable `step_status`"));
@@ -1577,7 +1535,7 @@ fn accepts_pdf_file_inputs() {
     "actions": []
 }"#;
 
-    let generated = build_support::generate_agent_model_from_str(cfg).unwrap();
+    let generated = generate_with_strict_parity(cfg).unwrap();
 
     assert!(generated.contains(
         "Input { name: None, kind: InputKind::File, value: Some(\"./reports/q1.pdf\".to_string()) }"
@@ -1600,7 +1558,7 @@ fn accepts_docx_file_inputs() {
     "actions": []
 }"#;
 
-    let generated = build_support::generate_agent_model_from_str(cfg).unwrap();
+    let generated = generate_with_strict_parity(cfg).unwrap();
 
     assert!(generated.contains(
         "Input { name: None, kind: InputKind::File, value: Some(\"./reports/q1.docx\".to_string()) }"
@@ -1623,7 +1581,7 @@ fn accepts_csv_file_inputs() {
     "actions": []
 }"#;
 
-    let generated = build_support::generate_agent_model_from_str(cfg).unwrap();
+    let generated = generate_with_strict_parity(cfg).unwrap();
 
     assert!(generated.contains(
         "Input { name: None, kind: InputKind::File, value: Some(\"./reports/q1.csv\".to_string()) }"
@@ -1654,7 +1612,7 @@ fn accepts_phase_three_file_inputs() {
 }}"#
         );
 
-        let generated = build_support::generate_agent_model_from_str(&cfg)
+        let generated = generate_with_strict_parity(&cfg)
             .unwrap_or_else(|err| panic!("expected {extension} to be accepted: {err}"));
 
         assert!(
@@ -1682,9 +1640,7 @@ fn rejects_unsupported_file_inputs() {
     "actions": []
 }"#;
 
-    let err = build_support::generate_agent_model_from_str(cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.inputs[0].path"));
     assert!(err.contains("supported extension"));
@@ -1710,9 +1666,7 @@ fn rejects_agent_absolute_path() {
     .to_string();
     let cfg = config_with(r#""value": { "type": "integer" }"#, &actions);
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].agent"));
     assert!(err.contains("absolute paths are not allowed"));
@@ -1736,9 +1690,7 @@ fn rejects_agent_bare_executable_name() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].agent"));
     assert!(err.contains("bare child-agent names are not allowed"));
@@ -1762,9 +1714,7 @@ fn rejects_agent_parent_traversal_path() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].agent"));
     assert!(err.contains("parent traversal"));
@@ -1786,9 +1736,7 @@ fn rejects_image_input_parent_traversal_path() {
     "actions": []
 }"#;
 
-    let err = build_support::generate_agent_model_from_str(cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.inputs[0].path"));
     assert!(err.contains("parent traversal"));
@@ -1811,9 +1759,7 @@ fn rejects_image_input_absolute_path() {
     })
     .to_string();
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.inputs[0].path"));
     assert!(err.contains("current level or below"));
@@ -1838,9 +1784,7 @@ fn rejects_agent_program_field() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].program"));
     assert!(err.contains("not supported for `agent`"));
@@ -1872,7 +1816,7 @@ fn normalizes_platform_string_and_array_values() {
         ]"#,
     );
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert!(generated.contains("platforms: Some(vec![\"macos\".to_string()])"));
     assert!(
@@ -1900,9 +1844,7 @@ fn rejects_unknown_platform_with_actionable_path() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].platform"));
     assert!(err.contains("supported: `macos`, `linux`, `windows`"));
@@ -1928,9 +1870,7 @@ fn rejects_empty_platform_array_with_actionable_path() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].platform"));
     assert!(err.contains("expected at least one platform entry"));
@@ -1956,9 +1896,7 @@ fn rejects_duplicate_platforms_after_normalization() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].platform[1]"));
     assert!(err.contains("duplicate platform `macos`"));
@@ -1984,9 +1922,7 @@ fn rejects_non_string_platform_entries_with_actionable_path() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].platform[1]"));
     assert!(err.contains("expected a string platform value"));
@@ -2011,9 +1947,7 @@ fn rejects_invalid_action_arg_object_shape_with_actionable_path() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].args[0]"));
     assert!(err.contains("supported: `var`"));
@@ -2038,9 +1972,7 @@ fn rejects_non_string_var_name_with_actionable_path() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].args[0].var"));
     assert!(err.contains("expected `var` to be a string field name"));
@@ -2065,9 +1997,7 @@ fn rejects_unknown_action_arg_variable_with_actionable_path() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].args[0].var"));
     assert!(err.contains("unknown variable `missing_field`"));
@@ -2092,9 +2022,7 @@ fn rejects_structured_action_arg_variables_after_array_fields_are_enabled() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].run[0].args[0].var"));
     assert!(err.contains(
@@ -2117,9 +2045,7 @@ fn rejects_non_object_action_logic_with_actionable_path() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].logic"));
     assert!(err.contains("expected a JSON Logic object expression"));
@@ -2140,9 +2066,7 @@ fn rejects_multi_operator_action_logic_object_with_actionable_path() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].logic"));
     assert!(err.contains("exactly one operator key"));
@@ -2163,9 +2087,7 @@ fn rejects_unknown_logic_var_with_actionable_path() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].logic.==[0].var"));
     assert!(err.contains("unknown variable `missing_field`"));
@@ -2186,9 +2108,7 @@ fn rejects_logic_type_mismatch_with_actionable_path() {
         ]"#,
     );
 
-    let err = build_support::generate_agent_model_from_str(&cfg)
-        .unwrap_err()
-        .to_string();
+    let err = generate_with_strict_parity(&cfg).unwrap_err().to_string();
 
     assert!(err.contains("$.actions[0].logic.=="));
     assert!(err.contains("incompatible operand types"));
@@ -2213,7 +2133,7 @@ fn escapes_action_literals_and_logic_payload_safely() {
         ]"#,
     );
 
-    let generated = build_support::generate_agent_model_from_str(&cfg).unwrap();
+    let generated = generate_with_strict_parity(&cfg).unwrap();
 
     assert!(generated.contains("logic: serde_json::from_str(\""));
     assert!(!generated.contains("serde_json::from_str(r#\""));
@@ -2270,4 +2190,135 @@ fn generates_canonical_build_provenance_constants() {
         r#"const AGENT_EMBEDDED_DEFINITION_JSON: &str = "{}";"#,
         expected_definition.replace('"', "\\\"")
     )));
+}
+
+#[test]
+fn canonical_authoring_corpus_matches_codegen_contract() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/definition_validation");
+    let mut paths = std::fs::read_dir(root)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "json")
+        })
+        .collect::<Vec<_>>();
+    paths.sort();
+    assert!(
+        paths.len() >= 50,
+        "the canonical corpus must not silently disappear"
+    );
+    for path in paths {
+        let case: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let actual = build_support::generate_agent_model_from_str(&case["definition"].to_string());
+        let expected = &case["expected"];
+        if expected["accepted"] == true {
+            assert!(actual.is_ok(), "{}: {actual:?}", path.display());
+        } else {
+            match actual.expect_err(&path.display().to_string()) {
+                build_support::BuildError::Definition(error) => {
+                    assert_eq!(
+                        serde_json::json!(error.code),
+                        expected["code"],
+                        "{}",
+                        path.display()
+                    );
+                    assert_eq!(
+                        serde_json::json!(error.path),
+                        expected["path"],
+                        "{}",
+                        path.display()
+                    );
+                    assert!(!error.corrective_action.is_empty());
+                }
+                other => panic!("{}: missing shared contract error: {other}", path.display()),
+            }
+        }
+    }
+}
+
+#[test]
+fn installed_authoring_examples_use_valid_strict_contracts() {
+    for directory in ["templates/guidance/examples", "templates/shared/examples"] {
+        for entry in
+            std::fs::read_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(directory))
+                .unwrap()
+        {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|extension| extension != "json") {
+                continue;
+            }
+            let raw = std::fs::read_to_string(&path).unwrap();
+            let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            assert_eq!(
+                value["agent_definition_schema_version"],
+                "2026-09-09.r1",
+                "{}",
+                path.display()
+            );
+            build_support::generate_agent_model_from_str(&raw)
+                .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        }
+    }
+}
+
+#[test]
+fn canonical_resource_boundaries_match_codegen_contract() {
+    let mut count = 0;
+    boundary_cases::visit_limit_cases(|name, value, expected| {
+        count += 1;
+        let actual = build_support::generate_agent_model_from_str(&value.to_string());
+        if let Some((limit, path)) = expected {
+            match actual.expect_err(name) {
+                build_support::BuildError::Definition(error) => {
+                    assert_eq!(error.code, "limit_exceeded", "{name}: {error}");
+                    assert_eq!(error.limit, Some(limit), "{name}: {error}");
+                    assert_eq!(error.path, path, "{name}: {error}");
+                    assert!(error.observed.unwrap() > error.maximum.unwrap());
+                }
+                error => panic!("{name}: missing shared resource error: {error}"),
+            }
+        } else {
+            assert!(actual.is_ok(), "{name}: {actual:?}");
+        }
+    });
+    assert_eq!(count, 46);
+}
+
+#[test]
+fn generated_raw_output_contract_has_bounded_evaluation() {
+    boundary_cases::visit_output_limit_cases(|name, value, schema, expected| {
+        let definition = serde_json::json!({"agent_definition_schema_version":"2026-09-09.r1","agent_schema":schema,"actions":[]});
+        let generated =
+            build_support::generate_agent_model_from_str(&definition.to_string()).unwrap();
+        assert!(generated.contains("fn validate_raw_response"));
+        assert!(generated.contains("deny_unknown_fields"));
+        let actual = build_support::definition_validation::validate_model_output(value, schema);
+        if let Some((limit, path)) = expected {
+            let error = actual.expect_err(name);
+            assert_eq!(error.code, "limit_exceeded", "{name}");
+            assert_eq!(error.limit, Some(limit), "{name}");
+            assert_eq!(error.path, path, "{name}");
+        } else {
+            assert!(actual.is_ok(), "{name}: {actual:?}");
+        }
+    });
+}
+
+#[test]
+fn malformed_json_uses_shared_codegen_error() {
+    for raw in ["{", "not json", "[1,]", "{\"x\":NaN}"] {
+        match build_support::generate_agent_model_from_str(raw)
+            .expect_err("malformed source must fail")
+        {
+            build_support::BuildError::Definition(error) => {
+                assert_eq!(error.code, "invalid_json");
+                assert_eq!(error.path, "$");
+                assert!(!error.corrective_action.is_empty());
+            }
+            error => panic!("missing shared parse failure: {error}"),
+        }
+    }
 }

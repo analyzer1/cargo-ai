@@ -1,6 +1,6 @@
 //! Handles exporting the compiled agent binary to the requested output directory.
 
-use super::build_target::BuildTarget;
+use super::build_target::{BuildTarget, CargoCompileProfile};
 use std::fs;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
@@ -44,7 +44,8 @@ pub fn export_binary(
 ) -> io::Result<PathBuf> {
     let project_path = super::agent_workspace_path(agent_name);
     let source_root = source_project_path.unwrap_or(project_path.as_path());
-    let source_path = build_target.compiled_binary_path(source_root, agent_name);
+    let source_path =
+        build_target.compiled_binary_path(source_root, agent_name, CargoCompileProfile::Release);
     let dest_dir = match output_dir {
         Some(path) => path.to_path_buf(),
         None => std::env::current_dir()?,
@@ -72,7 +73,7 @@ pub fn export_binary(
 #[cfg(test)]
 mod tests {
     use super::{export_binary, export_binary_to_path};
-    use crate::agent_builder::build_target::BuildTarget;
+    use crate::agent_builder::build_target::{BuildTarget, CargoCompileProfile};
     use std::fs;
     use std::io::ErrorKind;
     use std::path::{Path, PathBuf};
@@ -126,7 +127,11 @@ mod tests {
     fn export_creates_missing_output_directory() {
         let workspace = super::super::agent_workspace_path("export_create_dir");
         let build_target = BuildTarget::from_cli(None).expect("default target should resolve");
-        let source_path = build_target.compiled_binary_path(&workspace, "export_create_dir");
+        let source_path = build_target.compiled_binary_path(
+            &workspace,
+            "export_create_dir",
+            CargoCompileProfile::Release,
+        );
         let source_parent = source_path
             .parent()
             .expect("compiled binary should have a parent directory");
@@ -154,7 +159,11 @@ mod tests {
     fn export_rejects_output_dir_that_is_a_file() {
         let workspace = super::super::agent_workspace_path("export_bad_output_dir");
         let build_target = BuildTarget::from_cli(None).expect("default target should resolve");
-        let source_path = build_target.compiled_binary_path(&workspace, "export_bad_output_dir");
+        let source_path = build_target.compiled_binary_path(
+            &workspace,
+            "export_bad_output_dir",
+            CargoCompileProfile::Release,
+        );
         let source_parent = source_path
             .parent()
             .expect("compiled binary should have a parent directory");
@@ -180,12 +189,54 @@ mod tests {
     }
 
     #[test]
+    fn export_selects_release_and_never_falls_back_to_debug() {
+        let workspace = temp_test_dir();
+        let target = BuildTarget::from_cli(None).unwrap();
+        let dev =
+            target.compiled_binary_path(&workspace, "profile_probe", CargoCompileProfile::Dev);
+        let release =
+            target.compiled_binary_path(&workspace, "profile_probe", CargoCompileProfile::Release);
+        for (path, bytes) in [
+            (&dev, "wrong debug artifact"),
+            (&release, "release artifact"),
+        ] {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, bytes).unwrap();
+        }
+        let destination = workspace.join("out");
+        let exported = export_binary(
+            "profile_probe",
+            false,
+            &target,
+            Some(&destination),
+            Some(&workspace),
+        )
+        .unwrap();
+        assert_eq!(fs::read_to_string(&exported).unwrap(), "release artifact");
+        fs::remove_file(&release).unwrap();
+        let error = export_binary(
+            "profile_probe",
+            true,
+            &target,
+            Some(&destination),
+            Some(&workspace),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::NotFound);
+        assert_eq!(fs::read_to_string(exported).unwrap(), "release artifact");
+        fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[test]
     fn export_can_read_from_shared_build_root() {
         let workspace = super::super::agent_workspace_path("export_shared_build_root");
         let build_target = BuildTarget::from_cli(None).expect("default target should resolve");
         let shared_root = temp_test_dir().join("template-root");
-        let source_path =
-            build_target.compiled_binary_path(&shared_root, "export_shared_build_root");
+        let source_path = build_target.compiled_binary_path(
+            &shared_root,
+            "export_shared_build_root",
+            CargoCompileProfile::Release,
+        );
         let source_parent = source_path
             .parent()
             .expect("compiled binary should have a parent directory");

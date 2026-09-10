@@ -1,0 +1,55 @@
+{
+  "name": "duplicate_named_input",
+  "definition": {
+    "agent_definition_schema_version": "2026-09-09.r1",
+    "inputs": [
+      {
+        "name": "note",
+        "type": "text",
+        "text": "One."
+      },
+      {
+        "name": "note",
+        "type": "text",
+        "text": "Two."
+      }
+    ],
+    "agent_schema": {
+      "type": "object",
+      "properties": {
+        "answer": {
+          "type": "integer"
+        }
+      }
+    },
+    "actions": [
+      {
+        "name": "print_answer",
+        "logic": {
+          "==": [
+            {
+              "var": "answer"
+            },
+            4
+          ]
+        },
+        "run": [
+          {
+            "kind": "exec",
+            "program": "echo",
+            "args": [
+              {
+                "var": "answer"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "accepted": false,
+    "code": "duplicate_name",
+    "path": "$.inputs[1].name"
+  }
+}

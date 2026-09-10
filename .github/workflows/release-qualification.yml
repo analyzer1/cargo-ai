@@ -58,6 +58,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: live-provider-ci
     timeout-minutes: 15
+    outputs:
+      evidence: ${{ steps.probe.outputs.evidence }}
     steps:
       - name: Validate exact trusted Cargo AI candidate
         shell: bash
@@ -82,29 +84,25 @@ jobs:
         shell: bash
         run: echo "CARGO_AI_HOME=$RUNNER_TEMP/cargo-ai-home" >> "$GITHUB_ENV"
       - name: Run one representative OpenAI check
+        id: probe
         env:
+          CARGO_AI_SHA: ${{ inputs.cargo_ai_sha || github.sha }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL: ${{ inputs.openai_model || vars.OPENAI_MODEL }}
         run: |
           set -euo pipefail
           [[ -n "${OPENAI_API_KEY:-}" ]] || { echo "OPENAI_API_KEY is required" >&2; exit 1; }
           [[ -n "${OPENAI_MODEL:-}" ]] || { echo "OPENAI_MODEL is required" >&2; exit 1; }
-          cargo test --locked --test provider_smoke live_openai_smoke_uses_isolated_stdin_credentials -- --ignored --exact
+          cargo run --locked --example qualification-gate -- probe openai
 
   live_anthropic:
     name: Live Anthropic conformance
-    if: ${{ vars.LIVE_ANTHROPIC_ENABLED != '' && vars.LIVE_ANTHROPIC_ENABLED != 'false' }}
     runs-on: ubuntu-latest
     environment: live-provider-ci
     timeout-minutes: 15
+    outputs:
+      evidence: ${{ steps.probe.outputs.evidence }}
     steps:
-      - name: Validate Anthropic enrollment
-        shell: bash
-        env:
-          PROVIDER_ENABLED: ${{ vars.LIVE_ANTHROPIC_ENABLED }}
-        run: |
-          set -euo pipefail
-          [[ "$PROVIDER_ENABLED" == "true" ]] || { echo "LIVE_ANTHROPIC_ENABLED must equal true" >&2; exit 1; }
       - name: Validate exact trusted Cargo AI candidate
         shell: bash
         env:
@@ -128,14 +126,16 @@ jobs:
         shell: bash
         run: echo "CARGO_AI_HOME=$RUNNER_TEMP/cargo-ai-home" >> "$GITHUB_ENV"
       - name: Run one representative Anthropic check
+        id: probe
         env:
+          CARGO_AI_SHA: ${{ inputs.cargo_ai_sha || github.sha }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_MODEL: ${{ inputs.anthropic_model || vars.ANTHROPIC_MODEL }}
         run: |
           set -euo pipefail
-          [[ -n "${ANTHROPIC_API_KEY:-}" ]] || { echo "ANTHROPIC_API_KEY is required for enrolled Anthropic" >&2; exit 1; }
-          [[ -n "${ANTHROPIC_MODEL:-}" ]] || { echo "ANTHROPIC_MODEL is required for enrolled Anthropic" >&2; exit 1; }
-          cargo test --locked --test provider_smoke live_anthropic_smoke_uses_isolated_stdin_credentials -- --ignored --exact
+          [[ -n "${ANTHROPIC_API_KEY:-}" ]] || { echo "ANTHROPIC_API_KEY is required" >&2; exit 1; }
+          [[ -n "${ANTHROPIC_MODEL:-}" ]] || { echo "ANTHROPIC_MODEL is required" >&2; exit 1; }
+          cargo run --locked --example qualification-gate -- probe anthropic
 
   live_gemini:
     name: Live Gemini conformance
@@ -143,6 +143,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: live-provider-ci
     timeout-minutes: 15
+    outputs:
+      evidence: ${{ steps.probe.outputs.evidence }}
     steps:
       - name: Validate Gemini enrollment
         shell: bash
@@ -174,14 +176,16 @@ jobs:
         shell: bash
         run: echo "CARGO_AI_HOME=$RUNNER_TEMP/cargo-ai-home" >> "$GITHUB_ENV"
       - name: Run one representative Gemini check
+        id: probe
         env:
+          CARGO_AI_SHA: ${{ inputs.cargo_ai_sha || github.sha }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ inputs.gemini_model || vars.GEMINI_MODEL }}
         run: |
           set -euo pipefail
           [[ -n "${GEMINI_API_KEY:-}" ]] || { echo "GEMINI_API_KEY is required for enrolled Gemini" >&2; exit 1; }
           [[ -n "${GEMINI_MODEL:-}" ]] || { echo "GEMINI_MODEL is required for enrolled Gemini" >&2; exit 1; }
-          cargo test --locked --test provider_smoke live_gemini_smoke_uses_isolated_stdin_credentials -- --ignored --exact
+          cargo run --locked --example qualification-gate -- probe gemini
 
   live_xai:
     name: Live xAI conformance
@@ -189,6 +193,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: live-provider-ci
     timeout-minutes: 15
+    outputs:
+      evidence: ${{ steps.probe.outputs.evidence }}
     steps:
       - name: Validate xAI enrollment
         shell: bash
@@ -220,14 +226,16 @@ jobs:
         shell: bash
         run: echo "CARGO_AI_HOME=$RUNNER_TEMP/cargo-ai-home" >> "$GITHUB_ENV"
       - name: Run one representative xAI check
+        id: probe
         env:
+          CARGO_AI_SHA: ${{ inputs.cargo_ai_sha || github.sha }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           XAI_MODEL: ${{ inputs.xai_model || vars.XAI_MODEL }}
         run: |
           set -euo pipefail
           [[ -n "${XAI_API_KEY:-}" ]] || { echo "XAI_API_KEY is required for enrolled xAI" >&2; exit 1; }
           [[ -n "${XAI_MODEL:-}" ]] || { echo "XAI_MODEL is required for enrolled xAI" >&2; exit 1; }
-          cargo test --locked --test provider_smoke live_xai_smoke_uses_isolated_stdin_credentials -- --ignored --exact
+          cargo run --locked --example qualification-gate -- probe xai
 
   live_mistral:
     name: Live Mistral conformance
@@ -235,6 +243,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: live-provider-ci
     timeout-minutes: 15
+    outputs:
+      evidence: ${{ steps.probe.outputs.evidence }}
     steps:
       - name: Validate Mistral enrollment
         shell: bash
@@ -266,14 +276,16 @@ jobs:
         shell: bash
         run: echo "CARGO_AI_HOME=$RUNNER_TEMP/cargo-ai-home" >> "$GITHUB_ENV"
       - name: Run one representative Mistral check
+        id: probe
         env:
+          CARGO_AI_SHA: ${{ inputs.cargo_ai_sha || github.sha }}
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           MISTRAL_MODEL: ${{ inputs.mistral_model || vars.MISTRAL_MODEL }}
         run: |
           set -euo pipefail
           [[ -n "${MISTRAL_API_KEY:-}" ]] || { echo "MISTRAL_API_KEY is required for enrolled Mistral" >&2; exit 1; }
           [[ -n "${MISTRAL_MODEL:-}" ]] || { echo "MISTRAL_MODEL is required for enrolled Mistral" >&2; exit 1; }
-          cargo test --locked --test provider_smoke live_mistral_smoke_uses_isolated_stdin_credentials -- --ignored --exact
+          cargo run --locked --example qualification-gate -- probe mistral
 
   summary:
     name: Product qualification summary
@@ -292,18 +304,22 @@ jobs:
           path: qualification-dashboard-source
           persist-credentials: false
 
+      - name: Set up Rust for the qualification helper
+        if: ${{ always() }}
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable, resolved 2026-08-02
+
       - name: Render and enforce qualification dashboard
         if: ${{ always() }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          PROVIDER_PROBE_RECORDS: ${{ toJSON(needs) }}
           DETERMINISTIC_RESULT: ${{ needs.deterministic.result }}
           PACKAGE_RESULT: ${{ needs.packages.result }}
           CARGO_AI_SHA: ${{ inputs.cargo_ai_sha || github.sha }}
           TRUSTED_TRIGGER_SHA: ${{ github.sha }}
           CATALOG_CHECKOUT_OUTCOME: ${{ steps.candidate_metadata.outcome }}
           CATALOG_PATH: qualification-dashboard-source/.github/package-qualification-catalog.toml
-          LIVE_ANTHROPIC_ENABLED: ${{ vars.LIVE_ANTHROPIC_ENABLED }}
           LIVE_GEMINI_ENABLED: ${{ vars.LIVE_GEMINI_ENABLED }}
           LIVE_XAI_ENABLED: ${{ vars.LIVE_XAI_ENABLED }}
           LIVE_MISTRAL_ENABLED: ${{ vars.LIVE_MISTRAL_ENABLED }}
@@ -352,338 +368,4 @@ jobs:
           export JOBS_JSON="$jobs_json"
           export JOBS_API_STATUS="$jobs_api_status"
 
-          python3 - <<'PY'
-          import datetime
-          import json
-          import os
-          import re
-          import sys
-          import tomllib
-          from pathlib import Path
-
-          SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
-          REPOSITORY_PATTERN = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
-          FAILING_CONCLUSIONS = {
-              "action_required",
-              "failure",
-              "neutral",
-              "stale",
-              "startup_failure",
-              "timed_out",
-          }
-          STATUS_LABELS = {
-              "pass": "✅ pass",
-              "fail": "❌ fail",
-              "cancelled": "🚫 cancelled",
-              "skipped": "⏭️ skipped",
-              "not_configured": "⚪ not configured",
-              "missing": "❓ missing",
-          }
-
-          OPTIONAL_PROVIDER_FLAGS = {
-              "Anthropic": "LIVE_ANTHROPIC_ENABLED",
-              "Gemini": "LIVE_GEMINI_ENABLED",
-              "xAI": "LIVE_XAI_ENABLED",
-              "Mistral": "LIVE_MISTRAL_ENABLED",
-          }
-
-          def table_cell(value):
-              return str(value).replace("|", r"\|").replace("\r", " ").replace("\n", "<br>")
-
-          def trusted_job_url(value):
-              prefix = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}/job/"
-              return value if isinstance(value, str) and value.startswith(prefix) else run_url
-
-          def optional_provider_enrollment(provider):
-              value = os.environ.get(OPTIONAL_PROVIDER_FLAGS[provider], "").strip()
-              if value == "true":
-                  return True
-              if value in {"", "false"}:
-                  return False
-              return None
-
-          def aggregate_jobs(expected):
-              selected = []
-              for label, suffix in expected:
-                  matches = [
-                      job
-                      for job in jobs
-                      if str(job.get("name", "")).endswith(suffix)
-                      and job.get("head_sha") == trigger_sha
-                      and isinstance(job.get("run_attempt"), int)
-                      and 1 <= job["run_attempt"] <= current_attempt
-                  ]
-                  if not matches:
-                      return {
-                          "status": "missing",
-                          "completed": "—",
-                          "evidence": f"[Workflow run]({run_url})",
-                      }
-                  latest_attempt = max(job["run_attempt"] for job in matches)
-                  latest_matches = [job for job in matches if job["run_attempt"] == latest_attempt]
-                  if len(latest_matches) != 1:
-                      return {
-                          "status": "missing",
-                          "completed": "—",
-                          "evidence": f"[Workflow run]({run_url})",
-                      }
-                  selected.append((label, latest_matches[0]))
-
-              conclusions = []
-              for _, job in selected:
-                  if job.get("status") != "completed" or not job.get("conclusion"):
-                      return {
-                          "status": "missing",
-                          "completed": "—",
-                          "evidence": f"[Workflow run]({run_url})",
-                      }
-                  conclusions.append(job["conclusion"])
-
-              known_conclusions = FAILING_CONCLUSIONS | {"cancelled", "skipped", "success"}
-              if any(conclusion not in known_conclusions for conclusion in conclusions):
-                  status = "missing"
-              elif any(conclusion in FAILING_CONCLUSIONS for conclusion in conclusions):
-                  status = "fail"
-              elif any(conclusion == "cancelled" for conclusion in conclusions):
-                  status = "cancelled"
-              elif any(conclusion == "skipped" for conclusion in conclusions):
-                  status = "skipped"
-              elif all(conclusion == "success" for conclusion in conclusions):
-                  status = "pass"
-              else:
-                  status = "missing"
-
-              completed_values = [job.get("completed_at") for _, job in selected if job.get("completed_at")]
-              completed = max(completed_values) if completed_values else "—"
-              evidence = " · ".join(
-                  f"[{label}]({trusted_job_url(job.get('html_url'))})" for label, job in selected
-              )
-              return {"status": status, "completed": completed, "evidence": evidence}
-
-          def read_catalog():
-              if os.environ.get("CATALOG_CHECKOUT_OUTCOME") != "success":
-                  raise ValueError("candidate metadata checkout did not succeed")
-              catalog = tomllib.loads(Path(os.environ["CATALOG_PATH"]).read_text(encoding="utf-8"))
-              if catalog.get("schema_version") != 1:
-                  raise ValueError("unsupported catalog schema")
-              official_packages = catalog.get("official_packages", [])
-              official_count = catalog.get("official_package_count")
-              if not isinstance(official_count, int) or official_count < 0:
-                  raise ValueError("invalid official package count")
-              if official_count != len(official_packages):
-                  raise ValueError("official package count mismatch")
-              canaries = [
-                  row
-                  for row in catalog.get("qualification_canaries", [])
-                  if row.get("enabled") and row.get("release_required")
-              ]
-              if len(canaries) != 1:
-                  raise ValueError("expected one release-required qualification canary")
-              canary = canaries[0]
-              repository = canary.get("repository", "")
-              revision = canary.get("revision", "")
-              platforms = canary.get("platforms", [])
-              if not REPOSITORY_PATTERN.fullmatch(repository):
-                  raise ValueError("invalid canary repository")
-              if not SHA_PATTERN.fullmatch(revision):
-                  raise ValueError("invalid canary revision")
-              if not isinstance(platforms, list) or not 1 <= len(platforms) <= 3:
-                  raise ValueError("invalid canary platforms")
-              return repository, revision, len(platforms), official_count
-
-          repository = os.environ["GITHUB_REPOSITORY"]
-          run_url = f"https://github.com/{repository}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
-          current_attempt = int(os.environ["GITHUB_RUN_ATTEMPT"])
-          candidate = os.environ.get("CARGO_AI_SHA", "").strip()
-          candidate_valid = bool(SHA_PATTERN.fullmatch(candidate))
-          trigger_sha = os.environ.get("TRUSTED_TRIGGER_SHA", "").strip()
-          trigger_valid = bool(SHA_PATTERN.fullmatch(trigger_sha))
-          candidate_display = f"`{candidate}`" if candidate_valid else "invalid or missing exact commit"
-          candidate_url = f"https://github.com/{repository}/commit/{candidate}" if candidate_valid else run_url
-          generated_at = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-          jobs = []
-          jobs_api_ok = os.environ.get("JOBS_API_STATUS") == "0"
-          if jobs_api_ok:
-              try:
-                  payload = json.loads(Path(os.environ["JOBS_JSON"]).read_text(encoding="utf-8"))
-                  jobs = payload.get("jobs", [])
-                  jobs_api_ok = isinstance(jobs, list)
-              except (OSError, ValueError, TypeError):
-                  jobs_api_ok = False
-                  jobs = []
-
-          deterministic = aggregate_jobs(
-              [
-                  ("Ubuntu", "Deterministic qualification (ubuntu-latest)"),
-                  ("macOS", "Deterministic qualification (macos-latest)"),
-                  ("Windows", "Deterministic qualification (windows-latest)"),
-              ]
-          )
-          package = aggregate_jobs(
-              [
-                  ("Ubuntu", "Source package qualification (ubuntu-latest)"),
-                  ("macOS", "Source package qualification (macos-latest)"),
-                  ("Windows", "Source package qualification (windows-latest)"),
-              ]
-          )
-          provider_jobs = {
-              "OpenAI": aggregate_jobs([("OpenAI job", "Live OpenAI conformance")]),
-              "Anthropic": aggregate_jobs([("Anthropic job", "Live Anthropic conformance")]),
-              "Gemini": aggregate_jobs([("Gemini job", "Live Gemini conformance")]),
-              "xAI": aggregate_jobs([("xAI job", "Live xAI conformance")]),
-              "Mistral": aggregate_jobs([("Mistral job", "Live Mistral conformance")]),
-          }
-          provider_rows = []
-          provider_configuration_ok = True
-          for provider, result in provider_jobs.items():
-              if provider == "OpenAI":
-                  policy = "required"
-                  scope = "Required protected representative hosted check"
-              else:
-                  enrollment = optional_provider_enrollment(provider)
-                  if enrollment is True:
-                      policy = "required (enrolled)"
-                      scope = "Enrolled protected representative hosted check"
-                  elif enrollment is False:
-                      policy = "optional"
-                      scope = "Optional provider is not configured"
-                      if result["status"] == "skipped":
-                          result = {**result, "status": "not_configured"}
-                      else:
-                          provider_configuration_ok = False
-                          result = {**result, "status": "fail"}
-                  else:
-                      policy = "invalid configuration"
-                      scope = f"{OPTIONAL_PROVIDER_FLAGS[provider]} must be true, false, or unset"
-                      provider_configuration_ok = False
-                      result = {**result, "status": "fail"}
-              provider_rows.append(("Live provider", provider, policy, result, scope))
-
-          catalog_ok = True
-          try:
-              canary_repository, canary_revision, canary_platform_count, official_count = read_catalog()
-          except (OSError, ValueError, TypeError, tomllib.TOMLDecodeError):
-              catalog_ok = False
-              canary_repository = "unavailable"
-              canary_revision = ""
-              canary_platform_count = 0
-              official_count = None
-
-          catalog_url = (
-              f"https://github.com/{repository}/blob/{candidate}/.github/package-qualification-catalog.toml"
-              if candidate_valid
-              else run_url
-          )
-          if catalog_ok:
-              canary_url = f"https://github.com/{canary_repository}/tree/{canary_revision}"
-              canary_scope = (
-                  f"[{canary_repository}@{canary_revision[:12]}]({canary_url}); "
-                  f"{canary_platform_count} platforms"
-              )
-          else:
-              canary_scope = "Qualification catalog unavailable or invalid"
-              package = {
-                  "status": "missing",
-                  "completed": package["completed"],
-                  "evidence": package["evidence"],
-              }
-
-          if official_count == 0:
-              official = {
-                  "status": "skipped",
-                  "completed": "—",
-                  "evidence": f"[Catalog: 0 registered]({catalog_url})",
-              }
-              official_scope = "No registered official packages"
-          elif isinstance(official_count, int) and official_count > 0:
-              official = {
-                  "status": "missing",
-                  "completed": "—",
-                  "evidence": f"[Catalog: {official_count} registered]({catalog_url})",
-              }
-              official_scope = f"{official_count} registered; aggregate results required"
-          else:
-              official = {
-                  "status": "missing",
-                  "completed": "—",
-                  "evidence": f"[Qualification catalog]({catalog_url})",
-              }
-              official_scope = "Registered count unavailable"
-
-          rows = [
-              ("Product", "CLI and workflow conformance", "required", deterministic, "Ubuntu, macOS, Windows; shared deterministic family"),
-              ("Product", "Deterministic provider adapters", "required", deterministic, "6 adapters on Ubuntu, macOS, Windows"),
-              ("Product", "Maintained content", "required", deterministic, "Checked-in examples and definitions on the deterministic family"),
-              ("Package", "Public qualification canary lifecycle", "required", package, canary_scope),
-              ("Package", "Registered official packages", "conditional", official, official_scope),
-          ]
-          rows.extend(provider_rows)
-
-          required_results = [
-              result["status"]
-              for _, _, policy, result, _ in rows
-              if policy.startswith("required")
-          ]
-          family_results_ok = all(
-              os.environ.get(name) == "success"
-              for name in ("DETERMINISTIC_RESULT", "PACKAGE_RESULT")
-          )
-          official_results_ok = official["status"] in {"pass", "skipped"}
-          qualified = (
-              candidate_valid
-              and trigger_valid
-              and jobs_api_ok
-              and catalog_ok
-              and family_results_ok
-              and provider_configuration_ok
-              and official_results_ok
-              and all(status == "pass" for status in required_results)
-          )
-          decision = "pass" if qualified else "fail"
-
-          lines = [
-              "## Cargo AI Product Qualification",
-              "",
-              "> ✅ **QUALIFIED** — every required result passed."
-              if qualified
-              else "> ❌ **BLOCKED** — at least one required result failed, was cancelled, skipped, or is missing.",
-              "",
-              f"- Candidate: [{candidate_display}]({candidate_url})",
-              f"- Workflow run: [#{os.environ['GITHUB_RUN_NUMBER']} (attempt {os.environ['GITHUB_RUN_ATTEMPT']})]({run_url})",
-              f"- Generated: `{generated_at}`",
-              "",
-              "| Direction | Check | Policy | Status | Scope | Completed (UTC) | Evidence |",
-              "| --- | --- | --- | --- | --- | --- | --- |",
-          ]
-          for direction, check, policy, result, scope in rows:
-              lines.append(
-                  "| "
-                  + " | ".join(
-                      table_cell(value)
-                      for value in (
-                          direction,
-                          check,
-                          policy,
-                          STATUS_LABELS[result["status"]],
-                          scope,
-                          result["completed"],
-                          result["evidence"],
-                      )
-                  )
-                  + " |"
-              )
-          lines.extend(
-              [
-                  "| Product | Product qualification decision | required | "
-                  f"{STATUS_LABELS[decision]} | Exact candidate and required evidence | {generated_at} | [Workflow run]({run_url}) |",
-                  "",
-                  "JUnit and provenance artifacts remain the durable evidence. This summary contains no provider credentials or raw provider responses.",
-              ]
-          )
-          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as summary:
-              summary.write("\n".join(lines) + "\n")
-
-          if not qualified:
-              sys.exit("product qualification is blocked")
-          PY
+          env -u GH_TOKEN cargo run --locked --manifest-path qualification-dashboard-source/Cargo.toml --example qualification-gate -- aggregate

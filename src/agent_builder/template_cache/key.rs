@@ -1,4 +1,4 @@
-use crate::agent_builder::build_target::BuildTarget;
+use crate::agent_builder::build_target::{BuildTarget, CargoCompileProfile};
 use crate::cargo_ai_metadata;
 use std::process::Command;
 
@@ -7,15 +7,18 @@ pub(super) struct TemplateCacheKey {
     pub binary_sha256: String,
     pub rustc_version: String,
     pub target_triple: String,
+    pub compile_profile: CargoCompileProfile,
 }
 
 pub(super) fn resolve_template_cache_key(
     build_target: &BuildTarget,
+    compile_profile: CargoCompileProfile,
 ) -> Result<TemplateCacheKey, String> {
     Ok(TemplateCacheKey {
         binary_sha256: cargo_ai_metadata::current_binary_sha256()?,
         rustc_version: normalized_rustc_version()?,
         target_triple: build_target.cache_key_target().to_string(),
+        compile_profile,
     })
 }
 

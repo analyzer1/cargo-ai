@@ -1,5 +1,5 @@
 {
-  "agent_definition_schema_version": "2026-03-03.r1",
+  "agent_definition_schema_version": "2026-09-09.r1",
   "inputs": [
     {
       "type": "text",

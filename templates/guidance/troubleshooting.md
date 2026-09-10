@@ -8,18 +8,37 @@ Use this file when `cargo ai hatch <agent-name> --config <config.json> --check` 
 
 Check that the JSON includes:
 - `agent_definition_schema_version`
-- `inputs`
 - `agent_schema`
 - `actions`
 
+`inputs` is optional. `actions: []` is valid for a model-only definition; a declared action must have a nonempty `run` list.
+
 If the definition uses the legacy top-level `version` key, rename it to `agent_definition_schema_version` without changing its value. Copy schema-version values from current Cargo AI templates or guidance rather than inventing one from the current date or a package/project version.
+
+### Unsupported version or unknown field
+
+The current strict revision is `2026-09-09.r1`. Valid earlier revisions keep legacy parsing behavior. Every other revision at or after the cutoff produces `unsupported_schema_version`; check the intended contract or upgrade Cargo AI. Do not blindly replace an unsupported version header. Migration means reviewing and validating the complete definition.
+
+For `unknown_field`, read the reported JSON path and allowed keys. Correct a misspelling or remove an unsupported field; move commentary into a sidecar Markdown file. The step platform key is `platform`, not `platforms`.
+
+Strict schemas support only the subset in `agent-definition-contract.md`. Use `number`, not `num`. Do not add author-supplied `required`, `additionalProperties`, `format`, `$schema`, `$ref` or composition keywords. Cargo AI creates required-property and unknown-property provider metadata from the authored shape. No JSON Schema format assertions or remote schema-reference fetching are enabled.
+
+For `unsupported_operator`, use a supported JSON Logic operator. `literal` is unsupported; `{ "==": [1, 1] }` expresses an unconditional true gate.
+
+### Resource limit exceeded
+
+Read `limit`, `maximum` and `observed` at the reported path. Reduce repeated/literal data or split the workflow to fit the limits in `agent-definition-contract.md`. JSON formatting whitespace does not count toward decoded key/string bytes. Do not change the version merely to bypass bounded validation.
+
+### Structured output rejected
+
+Check that model output contains every declared field, no unknown root or nested fields, and values matching declared types, enums and numeric bounds. Invalid output stops before downstream actions. A valid shape does not establish factual accuracy or trustworthiness; application-specific checks still belong in the workflow and tools.
 
 ### Wrong field for a step kind
 
 Examples:
 - `output_variable` on `agent` or `email_me`
 - missing `program` for `exec`
-- missing `agent` for `kind: "agent"`
+- missing both `artifact` and legacy alias `agent`, or supplying both, for `kind: "agent"`
 - missing `name` for `kind: "tool"`
 - unsupported or misspelled `platform` values
 
@@ -75,6 +94,8 @@ Check for:
 - wiring agent JSON to a tool `name` that does not match the managed `tool.json`
 - using param names or scalar types that do not match the tool `describe` contract
 - setting `output_variable` on a tool step when the tool returns `result: null`
+- omitting `result` from an `invoke` response; the response requires exactly `protocol_version` and `result`, even when the result is null
+- returning an object or array as `result`; the supported result contract is string/null, so serialize structured application data into a declared string result
 - expecting `--ignore-tools` to make a missing tool succeed; it only skips the upfront audit
 
 ### Project bootstrap confusion
@@ -163,7 +184,7 @@ If the user asked for macOS-only local behavior:
 
 ## Default Fix Loop
 
-1. Read the reported field path.
+1. Read the stable error code, JSON field path, expected keys and corrective action.
 2. Fix one problem at a time.
 3. Re-run:
    - `cargo ai hatch <agent-name> --config <config.json> --check`

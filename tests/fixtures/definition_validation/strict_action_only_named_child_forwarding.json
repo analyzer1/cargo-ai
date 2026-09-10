@@ -1,0 +1,71 @@
+{
+  "name": "strict_action_only_named_child_forwarding",
+  "definition": {
+    "agent_definition_schema_version": "2026-09-09.r1",
+    "inputs": [
+      {
+        "name": "note",
+        "type": "text"
+      }
+    ],
+    "agent_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "actions": [
+      {
+        "name": "forward_note",
+        "logic": {
+          "==": [
+            {
+              "var": "runtime.enabled"
+            },
+            true
+          ]
+        },
+        "run": [
+          {
+            "kind": "agent",
+            "artifact": "./child.json",
+            "input_overrides": {
+              "note": {
+                "input": "note"
+              }
+            },
+            "run_vars": {
+              "suffix": {
+                "var": "runtime.suffix"
+              }
+            },
+            "inputs": [
+              {
+                "type": "text",
+                "text": [
+                  "Please review ",
+                  {
+                    "var": "runtime.suffix"
+                  }
+                ]
+              }
+            ],
+            "input_mode": "append",
+            "ignore_tools": false
+          }
+        ]
+      }
+    ],
+    "runtime_vars": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "suffix": {
+        "type": "string",
+        "default": "done"
+      }
+    }
+  },
+  "expected": {
+    "accepted": true
+  }
+}

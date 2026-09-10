@@ -1,0 +1,18 @@
+{
+  "name": "strict_optional_inputs_omitted",
+  "definition": {
+    "agent_definition_schema_version": "2026-09-09.r1",
+    "agent_schema": {
+      "type": "object",
+      "properties": {
+        "answer": {
+          "type": "integer"
+        }
+      }
+    },
+    "actions": []
+  },
+  "expected": {
+    "accepted": true
+  }
+}

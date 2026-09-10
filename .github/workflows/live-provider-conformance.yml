@@ -97,18 +97,11 @@ jobs:
 
   anthropic:
     name: Live Anthropic conformance
-    if: ${{ inputs.provider == 'anthropic' || (inputs.provider == 'all' && vars.LIVE_ANTHROPIC_ENABLED != '' && vars.LIVE_ANTHROPIC_ENABLED != 'false') }}
+    if: ${{ inputs.provider == 'anthropic' || inputs.provider == 'all' }}
     runs-on: ubuntu-latest
     environment: live-provider-ci
     timeout-minutes: 15
     steps:
-      - name: Validate Anthropic enrollment
-        shell: bash
-        env:
-          PROVIDER_ENABLED: ${{ vars.LIVE_ANTHROPIC_ENABLED }}
-        run: |
-          set -euo pipefail
-          [[ "$PROVIDER_ENABLED" == "true" ]] || { echo "LIVE_ANTHROPIC_ENABLED must equal true" >&2; exit 1; }
       - name: Validate provider selection
         shell: bash
         env:

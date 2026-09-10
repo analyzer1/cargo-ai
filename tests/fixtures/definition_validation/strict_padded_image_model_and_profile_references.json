@@ -1,0 +1,55 @@
+{
+  "name": "strict_padded_image_model_and_profile_references",
+  "definition": {
+    "agent_definition_schema_version": "2026-09-09.r1",
+    "inputs": [
+      {
+        "type": "text",
+        "text": "Return answer as an integer."
+      }
+    ],
+    "agent_schema": {
+      "type": "object",
+      "properties": {
+        "answer": {
+          "type": "integer"
+        },
+        "image_model": {
+          "type": "string"
+        },
+        "image_profile": {
+          "type": "string"
+        }
+      }
+    },
+    "actions": [
+      {
+        "name": "print_answer",
+        "logic": {
+          "==": [
+            {
+              "var": "answer"
+            },
+            4
+          ]
+        },
+        "run": [
+          {
+            "kind": "generate_image",
+            "prompt": "An illustration.",
+            "path": "./image.png",
+            "model": {
+              "var": " image_model "
+            },
+            "profile": {
+              "var": " image_profile "
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "accepted": true
+  }
+}

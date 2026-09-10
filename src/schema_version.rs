@@ -6,7 +6,7 @@ use serde_json::Value;
 
 const ROOT_AGENTCFG: &str = include_str!("../.agentcfg");
 
-pub const SCHEMA_VERSION_EXAMPLE: &str = "2026-03-03.r1";
+pub const SCHEMA_VERSION_EXAMPLE: &str = crate::definition_validation::STRICT_SCHEMA_VERSION;
 pub const AGENT_DEFINITION_SCHEMA_VERSION_KEY: &str = "agent_definition_schema_version";
 
 pub fn current_schema_version() -> String {
@@ -28,66 +28,7 @@ pub fn extract_schema_version_from_agentcfg(agentcfg_contents: &str) -> Option<S
 }
 
 pub fn is_valid_schema_version(value: &str) -> bool {
-    let Some((date, revision)) = value.split_once(".r") else {
-        return false;
-    };
-
-    if !is_valid_date_prefix(date) {
-        return false;
-    }
-
-    if revision.is_empty() || !revision.chars().all(|ch| ch.is_ascii_digit()) {
-        return false;
-    }
-
-    revision.parse::<u32>().ok().filter(|n| *n > 0).is_some()
-}
-
-fn is_valid_date_prefix(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    if bytes.len() != 10 {
-        return false;
-    }
-
-    if bytes[4] != b'-' || bytes[7] != b'-' {
-        return false;
-    }
-
-    let year = match value[0..4].parse::<u32>() {
-        Ok(year) => year,
-        Err(_) => return false,
-    };
-    let month = match value[5..7].parse::<u32>() {
-        Ok(month) => month,
-        Err(_) => return false,
-    };
-    let day = match value[8..10].parse::<u32>() {
-        Ok(day) => day,
-        Err(_) => return false,
-    };
-
-    if !(1..=12).contains(&month) {
-        return false;
-    }
-
-    let max_day = match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 => {
-            if is_leap_year(year) {
-                29
-            } else {
-                28
-            }
-        }
-        _ => return false,
-    };
-
-    (1..=max_day).contains(&day)
-}
-
-fn is_leap_year(year: u32) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+    crate::definition_validation::parse_schema_version(value).is_some()
 }
 
 #[cfg(test)]

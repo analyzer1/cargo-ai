@@ -1,0 +1,52 @@
+{
+  "name": "invalid_child_image_whitespace_path",
+  "definition": {
+    "agent_definition_schema_version": "2026-09-09.r1",
+    "inputs": [
+      {
+        "type": "text",
+        "text": "Return answer as an integer."
+      }
+    ],
+    "agent_schema": {
+      "type": "object",
+      "properties": {
+        "answer": {
+          "type": "integer"
+        }
+      }
+    },
+    "actions": [
+      {
+        "name": "print_answer",
+        "logic": {
+          "==": [
+            {
+              "var": "answer"
+            },
+            4
+          ]
+        },
+        "run": [
+          {
+            "kind": "agent",
+            "artifact": "./child.json",
+            "inputs": [
+              {
+                "type": "image",
+                "path": [
+                  " "
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "accepted": false,
+    "code": "invalid_value",
+    "path": "$.actions[0].run[0].inputs[0].path"
+  }
+}

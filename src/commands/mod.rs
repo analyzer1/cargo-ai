@@ -25,6 +25,8 @@ pub mod profile;
 pub mod run;
 pub mod runtime;
 pub mod runtime_actions;
+#[path = "../../templates/src/runtime_data.rs"]
+pub(crate) mod runtime_data;
 pub mod scaffold;
 pub mod tools;
 pub mod version;

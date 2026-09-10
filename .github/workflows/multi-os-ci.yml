@@ -52,7 +52,7 @@ jobs:
   deterministic:
     name: Deterministic qualification (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 60
     strategy:
       fail-fast: ${{ ! inputs.collect_all }}
       matrix:
@@ -87,29 +87,23 @@ jobs:
             echo "RUST_TEST_THREADS=1"
           } >> "$GITHUB_ENV"
 
+      - name: Check qualification policy
+        run: cargo test --locked --test qualification_policy
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
       - name: Check all targets
-        run: cargo check --all-targets
+        run: cargo check --locked --all-targets
 
       - name: Run deterministic test suite
-        run: cargo test --all-targets
+        run: cargo test --locked --all-targets
 
       - name: Run generated provider parity
         shell: bash
         run: |
           set -euo pipefail
-          for test_name in \
-            generated_anthropic_smoke_isolated_and_deterministic \
-            generated_gemini_smoke_isolated_and_deterministic \
-            generated_mistral_smoke_isolated_and_deterministic \
-            generated_xai_smoke_isolated_and_deterministic \
-            generated_openai_smoke_isolated_and_deterministic \
-            generated_ollama_smoke_isolated_and_deterministic
-          do
-            cargo test --test provider_smoke "$test_name" -- --ignored --exact
-          done
+          cargo test --locked --test provider_smoke generated_provider_batch_isolated_and_deterministic -- --ignored --exact --nocapture
 
       - name: Build candidate CLI
         run: cargo build --locked

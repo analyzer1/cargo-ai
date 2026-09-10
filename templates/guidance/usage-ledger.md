@@ -127,3 +127,7 @@ Inspect provider usage totals:
 ```bash
 jq -c 'select(.event_type == "provider_request_completed") | {agent: .agent.name, model: .provider.model, status, usage, duration_ms}' usage.ndjson
 ```
+
+## Project-owned Child Logs
+
+When a project opts in with `[runtime] data_root = ".cargo-ai/data"`, an action's child `usage_log` path resolves under that fixed directory. Installed aliases continue to use their own `data/`. These controlled relative paths reject traversal and links. An explicit top-level `--usage-log` or `CARGO_AI_USAGE_LOG` destination keeps its caller-selected meaning; the project setting does not redirect it. Legacy projects without the setting retain their previous path behavior.

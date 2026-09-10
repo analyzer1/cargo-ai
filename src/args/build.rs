@@ -7,7 +7,7 @@ pub fn command() -> Command {
         .about("Assemble a target-specific local build root from project-attached inputs")
         .arg(
             Arg::new("profile")
-                .help("Build profile name from .cargo-ai/project.toml (defaults to default)")
+                .help("Input-selection profile from .cargo-ai/project.toml, not a Cargo compile profile (defaults to default)")
                 .required(false)
                 .value_name("PROFILE"),
         )
@@ -22,7 +22,7 @@ pub fn command() -> Command {
             Arg::new("output_dir")
                 .long("output-dir")
                 .help(
-                    "Destination directory for the assembled build root (defaults to target/cargo-ai/build/<profile>/<target>)",
+                    "Destination directory for the assembled build root (defaults to target/cargo-ai/build/<profile>/<target>/release)",
                 )
                 .value_name("DIR")
                 .num_args(1),
@@ -36,7 +36,7 @@ pub fn command() -> Command {
                 .action(ArgAction::SetTrue),
         )
         .after_help(
-            "The build profile is read from `.cargo-ai/project.toml` and must explicitly list:\n  - `agent_definitions`\n  - `hatched_agents`\n  - `tools`\n  - `assets`\n\nBuilds use project-attached tools only. Machine-only tools must be attached to the project before build succeeds.",
+            "The build profile is read from `.cargo-ai/project.toml` and must explicitly list:\n  - `agent_definitions`\n  - `hatched_agents`\n  - `tools`\n  - `assets`\n\nFinal agents and tools use the Cargo release profile. Optimization settings remain in Cargo manifests. Builds use project-attached tools only. Machine-only tools must be attached to the project before build succeeds.",
         )
 }
 

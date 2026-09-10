@@ -1,0 +1,50 @@
+{
+  "name": "legacy_unregistered_older_revision",
+  "definition": {
+    "agent_definition_schema_version": "2026-09-08.r999",
+    "inputs": [
+      {
+        "type": "text",
+        "text": "Return answer as an integer."
+      }
+    ],
+    "agent_schema": {
+      "type": "object",
+      "properties": {
+        "answer": {
+          "type": "integer"
+        }
+      }
+    },
+    "actions": [
+      {
+        "name": "print_answer",
+        "logic": {
+          "==": [
+            {
+              "var": "answer"
+            },
+            4
+          ]
+        },
+        "run": [
+          {
+            "kind": "exec",
+            "program": "echo",
+            "args": [
+              {
+                "var": "answer"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "extension_note": {
+      "ignored": true
+    }
+  },
+  "expected": {
+    "accepted": true
+  }
+}

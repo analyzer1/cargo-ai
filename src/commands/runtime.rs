@@ -1297,6 +1297,17 @@ pub(crate) async fn run_with_definition_in_context_and_usage_agent(
             .as_deref()
             .and_then(crate::commands::local_packages::runtime_context_for_package_root)
     });
+    let project_data = match super::runtime_data::project_data_root(
+        project_root
+            .as_deref()
+            .filter(|_| package_context.is_none()),
+    ) {
+        Ok(context) => context,
+        Err(error) => {
+            eprintln!("x {error}");
+            return false;
+        }
+    };
     let tool_resolver = match runtime_tool_resolver(
         project_root.clone(),
         package_context.as_ref(),
@@ -1358,6 +1369,7 @@ pub(crate) async fn run_with_definition_in_context_and_usage_agent(
         }
     };
     let action_provider_context = super::runtime_actions::ActionProviderContext {
+        project_data,
         provider,
         profile_name: selected_profile
             .as_ref()
@@ -2183,6 +2195,7 @@ mod tests {
     #[test]
     fn render_runtime_failure_lines_include_context_and_recovery() {
         let context = crate::commands::runtime_actions::ActionProviderContext {
+            project_data: None,
             provider: ProviderKind::OpenAi,
             profile_name: Some("my_open_ai".to_string()),
             auth_mode: "chatgpt_account".to_string(),

@@ -1,7 +1,7 @@
 //! Runtime behavior for `cargo ai add`.
 use clap::ArgMatches;
 
-mod guidance;
+pub(crate) mod guidance;
 mod tool;
 
 /// Executes the `add` command flow from parsed CLI arguments.

@@ -1,4 +1,5 @@
 //! Runtime behavior for `cargo ai build`.
+use crate::agent_builder::build_target::CargoCompileProfile;
 use clap::ArgMatches;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -30,6 +31,8 @@ struct BuildProfileDocument {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 struct ProjectRuntimeDocument {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    data_root: Option<String>,
     #[serde(default)]
     defaults: Option<ProjectRuntimeDefaultsDocument>,
 }
@@ -71,7 +74,7 @@ struct HatchedAgentEntry {
 
 #[derive(Clone, Debug, Default)]
 struct LoadedProjectMetadata {
-    runtime_defaults: Option<ProjectRuntimeDefaultsDocument>,
+    project_runtime: Option<ProjectRuntimeDocument>,
     build_profile: BuildProfileDocument,
 }
 
@@ -79,6 +82,7 @@ struct LoadedProjectMetadata {
 struct BuildManifestDocument {
     format_version: u32,
     profile: String,
+    cargo_compile_profile: String,
     target: String,
     agent_definitions: Vec<String>,
     hatched_agents: Vec<BuildManifestHatchedAgent>,
@@ -136,6 +140,7 @@ pub fn run(sub_m: &ArgMatches) -> bool {
     };
 
     println!("Building profile `{profile_name}`...");
+    println!("Cargo profile: {}", CargoCompileProfile::Release.name());
     println!("Project: {}", project_root.display());
     println!("Target:  {}", build_target.cache_key_target());
     println!("Output:  {}", output_root.path.display());
@@ -151,7 +156,8 @@ pub fn run(sub_m: &ArgMatches) -> bool {
     ) {
         Ok(manifest) => {
             println!("✓ Build assembled");
-            println!("Profile: {}", manifest.profile);
+            println!("Build profile: {}", manifest.profile);
+            println!("Cargo profile: {}", manifest.cargo_compile_profile);
             println!("Target:  {}", manifest.target);
             println!("Output:  {}", output_root.path.display());
             if !manifest.hatched_agents.is_empty() {
@@ -179,7 +185,11 @@ fn load_project_metadata(
     project_root: &Path,
     profile_name: &str,
 ) -> Result<LoadedProjectMetadata, String> {
-    let metadata_path = project_root.join(PROJECT_METADATA_RELATIVE_PATH);
+    let metadata_path = super::runtime_data::confined_path(
+        project_root,
+        Path::new(PROJECT_METADATA_RELATIVE_PATH),
+        "Project metadata",
+    )?;
     let contents = fs::read_to_string(&metadata_path).map_err(|error| {
         format!(
             "Failed to read project metadata '{}': {}",
@@ -187,6 +197,7 @@ fn load_project_metadata(
             error
         )
     })?;
+    super::runtime_data::uses_project_data(&contents)?;
     let metadata: ProjectMetadataDocument = toml::from_str(&contents).map_err(|error| {
         format!(
             "Failed to parse project metadata '{}': {}",
@@ -223,7 +234,7 @@ fn load_project_metadata(
     }
 
     Ok(LoadedProjectMetadata {
-        runtime_defaults: metadata.runtime.and_then(|runtime| runtime.defaults),
+        project_runtime: metadata.runtime,
         build_profile: profile,
     })
 }
@@ -241,7 +252,8 @@ fn resolve_build_output_root(
                 .join("cargo-ai")
                 .join("build")
                 .join(profile_name)
-                .join(build_target.cache_key_target()),
+                .join(build_target.cache_key_target())
+                .join(CargoCompileProfile::Release.name()),
             explicit: false,
         });
     };
@@ -281,10 +293,11 @@ fn assemble_build_root(
     let tools = dedupe_preserve_order(&build_profile.tools);
     let assets = dedupe_preserve_order(&build_profile.assets);
 
+    validate_build_input_boundaries(project_root, build_profile, output_root)?;
     prepare_output_root(output_root, force)?;
     write_generated_project_metadata(
         output_root.path.as_path(),
-        loaded_metadata.runtime_defaults.as_ref(),
+        loaded_metadata.project_runtime.as_ref(),
     )?;
 
     for tool_name in &tools {
@@ -350,6 +363,7 @@ fn assemble_build_root(
     let manifest = BuildManifestDocument {
         format_version: 1,
         profile: profile_name.to_string(),
+        cargo_compile_profile: CargoCompileProfile::Release.name().to_string(),
         target: build_target.cache_key_target().to_string(),
         agent_definitions,
         hatched_agents: hatched_agents
@@ -370,6 +384,64 @@ fn assemble_build_root(
     write_build_manifest(output_root.path.as_path(), &manifest)?;
 
     Ok(manifest)
+}
+
+fn validate_build_input_boundaries(
+    project_root: &Path,
+    profile: &BuildProfileDocument,
+    output: &BuildOutputRoot,
+) -> Result<(), String> {
+    let resolved_output = super::runtime_data::validate_output_root(project_root, &output.path)?;
+    let mut sources = vec![PathBuf::from(PROJECT_METADATA_RELATIVE_PATH)];
+    for raw in profile
+        .agent_definitions
+        .iter()
+        .chain(&profile.hatched_agents)
+        .chain(&profile.assets)
+    {
+        let path = super::runtime_data::validate_declared_input(raw)?;
+        super::add::guidance::packaging::validate_declared(&path)?;
+        super::runtime_data::validate_source_tree(project_root, &path, false)?;
+        sources.push(path);
+    }
+    for tool in &profile.tools {
+        validate_tool_attached_to_project(project_root, tool)?;
+        let metadata = PathBuf::from(PROJECT_TOOLS_RELATIVE_PATH)
+            .join(tool)
+            .join("tool.json");
+        let checked = super::runtime_data::confined_path(project_root, &metadata, "Tool metadata")?;
+        let value: serde_json::Value =
+            serde_json::from_slice(&fs::read(checked).map_err(|error| error.to_string())?)
+                .map_err(|error| error.to_string())?;
+        if let Some(manifest) = value
+            .pointer("/source/manifest_path")
+            .and_then(serde_json::Value::as_str)
+        {
+            let manifest = super::runtime_data::validate_declared_input(manifest)?;
+            let source = manifest
+                .parent()
+                .ok_or("Tool manifest must have a source directory")?;
+            super::runtime_data::validate_declared_input(
+                source.to_str().ok_or("Tool source path must be Unicode")?,
+            )?;
+            super::runtime_data::validate_source_tree(project_root, source, true)?;
+            sources.push(source.to_path_buf());
+        }
+        sources.push(metadata);
+    }
+    let output = resolved_output;
+    for relative in sources {
+        let source = fs::canonicalize(project_root.join(relative))
+            .map_err(|error| format!("Failed to resolve build source: {error}"))?;
+        if output.starts_with(&source) || source.starts_with(&output) {
+            return Err(format!(
+                "Build output '{}' overlaps source '{}'",
+                output.display(),
+                source.display()
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn prepare_output_root(output_root: &BuildOutputRoot, force: bool) -> Result<(), String> {
@@ -418,7 +490,7 @@ fn remove_existing_output_root(path: &Path) -> Result<(), String> {
 
 fn write_generated_project_metadata(
     build_root: &Path,
-    runtime_defaults: Option<&ProjectRuntimeDefaultsDocument>,
+    project_runtime: Option<&ProjectRuntimeDocument>,
 ) -> Result<(), String> {
     let metadata_path = build_root.join(PROJECT_METADATA_RELATIVE_PATH);
     if let Some(parent) = metadata_path.parent() {
@@ -432,11 +504,7 @@ fn write_generated_project_metadata(
     }
     let document = GeneratedProjectMetadataDocument {
         format_version: 1,
-        runtime: runtime_defaults
-            .cloned()
-            .map(|defaults| ProjectRuntimeDocument {
-                defaults: Some(defaults),
-            }),
+        runtime: project_runtime.cloned(),
         tools: GeneratedProjectToolsPolicyDocument {
             allow_global_fallback: false,
         },
@@ -487,9 +555,11 @@ fn materialize_build_tool(
         build_target,
         crate::commands::tools::ToolScope::Project,
         project_root,
+        CargoCompileProfile::Release,
     )?;
     let artifact_relative_path = PathBuf::from("bin")
         .join(build_target.cache_key_target())
+        .join(CargoCompileProfile::Release.name())
         .join(resolved.binary_name.as_str());
     let output_tool_dir = build_root.join(PROJECT_TOOLS_RELATIVE_PATH).join(tool_name);
     let artifact_path = output_tool_dir.join(&artifact_relative_path);
@@ -654,6 +724,7 @@ fn hatch_agent_into_build_root(
     let warmed_template =
         crate::agent_builder::template_cache::ensure_warmed_template_with_prepare_hook(
             build_target,
+            CargoCompileProfile::Release,
             || {},
         )
         .map_err(|error| format!("Failed to prepare warmed template: {error}"))?;
@@ -715,11 +786,14 @@ fn copy_declared_path(
     build_root: &Path,
     require_json_file: bool,
 ) -> Result<(), String> {
+    super::runtime_data::validate_declared_input(relative_path)?;
+    super::add::guidance::packaging::validate_declared(Path::new(relative_path))?;
     validate_project_relative_path(
         relative_path,
         if require_json_file { "Agent" } else { "Asset" },
     )?;
-    let source_path = project_root.join(relative_path);
+    let source_path =
+        super::runtime_data::confined_path(project_root, Path::new(relative_path), "Build input")?;
     if !source_path.exists() {
         return Err(format!(
             "{} path '{}' was not found in the current project.",
@@ -749,13 +823,25 @@ fn copy_declared_path(
 
     let dest_path = build_root.join(relative_path);
     if source_path.is_dir() {
-        copy_directory_recursive(source_path.as_path(), dest_path.as_path())
+        copy_directory_recursive(
+            project_root,
+            source_path.as_path(),
+            dest_path.as_path(),
+            super::add::guidance::packaging::is_bundle_path(Path::new(relative_path)),
+        )
     } else {
-        copy_file(source_path.as_path(), dest_path.as_path())
+        copy_file(project_root, source_path.as_path(), dest_path.as_path())
     }
 }
 
-fn copy_file(source: &Path, dest: &Path) -> Result<(), String> {
+fn copy_file(project_root: &Path, source: &Path, dest: &Path) -> Result<(), String> {
+    super::runtime_data::confined_path(
+        project_root,
+        source
+            .strip_prefix(project_root)
+            .map_err(|error| error.to_string())?,
+        "Built file",
+    )?;
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent).map_err(|error| {
             format!(
@@ -776,7 +862,19 @@ fn copy_file(source: &Path, dest: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn copy_directory_recursive(source: &Path, dest: &Path) -> Result<(), String> {
+fn copy_directory_recursive(
+    project_root: &Path,
+    source: &Path,
+    dest: &Path,
+    declared_bundle: bool,
+) -> Result<(), String> {
+    super::runtime_data::confined_path(
+        project_root,
+        source
+            .strip_prefix(project_root)
+            .map_err(|error| error.to_string())?,
+        "Build directory",
+    )?;
     fs::create_dir_all(dest).map_err(|error| {
         format!(
             "Failed to create destination directory '{}': {}",
@@ -801,10 +899,33 @@ fn copy_directory_recursive(source: &Path, dest: &Path) -> Result<(), String> {
         })?;
         let source_path = entry.path();
         let dest_path = dest.join(entry.file_name());
+        if super::runtime_data::is_runtime_data(
+            source_path
+                .strip_prefix(project_root)
+                .map_err(|error| error.to_string())?,
+        ) {
+            continue;
+        }
+        if super::add::guidance::packaging::skip_entry(project_root, &source_path, declared_bundle)?
+        {
+            continue;
+        }
+        super::runtime_data::confined_path(
+            project_root,
+            source_path
+                .strip_prefix(project_root)
+                .map_err(|error| error.to_string())?,
+            "Build entry",
+        )?;
         if source_path.is_dir() {
-            copy_directory_recursive(source_path.as_path(), dest_path.as_path())?;
+            copy_directory_recursive(
+                project_root,
+                source_path.as_path(),
+                dest_path.as_path(),
+                declared_bundle,
+            )?;
         } else {
-            copy_file(source_path.as_path(), dest_path.as_path())?;
+            copy_file(project_root, source_path.as_path(), dest_path.as_path())?;
         }
     }
 
@@ -985,6 +1106,31 @@ assets = ["assets/prompts/"]
                 assets: vec!["assets/prompts/".to_string()],
             }
         );
+    }
+
+    #[test]
+    fn default_output_separates_assembly_and_cargo_profiles() {
+        let target =
+            crate::agent_builder::build_target::BuildTarget::from_cli(Some("aarch64-apple-darwin"))
+                .unwrap();
+        let project = std::env::current_dir().unwrap().join("fixture-project");
+        for assembly in ["default", "release"] {
+            let output =
+                super::resolve_build_output_root(&project, assembly, &target, None).unwrap();
+            assert_eq!(
+                output.path,
+                project
+                    .join("target/cargo-ai/build")
+                    .join(assembly)
+                    .join("aarch64-apple-darwin/release")
+            );
+            assert!(!output.explicit);
+        }
+        let explicit =
+            super::resolve_build_output_root(&project, "release", &target, Some("chosen-output"))
+                .unwrap();
+        assert_eq!(explicit.path, PathBuf::from("chosen-output"));
+        assert!(explicit.explicit);
     }
 
     #[test]

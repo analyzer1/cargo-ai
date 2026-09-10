@@ -1011,7 +1011,7 @@ mod tests {
         let response = send_request(&url, &model, &content_parts, 10, &token, response_format)
             .await
             .expect("stream response should parse");
-        assert_eq!(response, "{\"answer\":\"hi\"}");
+        assert_eq!(response.text, "{\"answer\":\"hi\"}");
     }
 
     #[tokio::test]
@@ -1038,7 +1038,8 @@ mod tests {
             .await
             .expect("image request should decode");
 
-        assert_eq!(image, expected_bytes);
+        assert_eq!(image.bytes, expected_bytes);
+        assert_eq!(image.usage, None);
     }
 
     #[tokio::test]
@@ -1084,7 +1085,7 @@ mod tests {
         .await
         .expect("image edit request should decode");
 
-        assert_eq!(image, expected_bytes);
+        assert_eq!(image.bytes, expected_bytes);
     }
 
     #[tokio::test]
@@ -1124,7 +1125,7 @@ data: [DONE]\n",
             .await
             .expect("chatgpt account transport should decode image bytes");
 
-        assert_eq!(image, expected_bytes);
+        assert_eq!(image.bytes, expected_bytes);
     }
 
     #[tokio::test]
@@ -1169,6 +1170,6 @@ data: [DONE]\n",
         .await
         .expect("chatgpt account transport should include image references");
 
-        assert_eq!(image, expected_bytes);
+        assert_eq!(image.bytes, expected_bytes);
     }
 }

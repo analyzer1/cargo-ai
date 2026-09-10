@@ -11,6 +11,7 @@ mod auth;
 #[cfg(feature = "developer-tools")]
 mod build;
 mod credentials;
+mod guidance;
 #[cfg(feature = "developer-tools")]
 mod hatch;
 mod init;
@@ -53,6 +54,7 @@ fn cli_command(bin_name: &'static str) -> Command {
         .subcommand(new::command())
         .subcommand(init::command())
         .subcommand(add::command())
+        .subcommand(guidance::command())
         .subcommand(packages::command())
         .subcommand(agents::command())
         .subcommand(mail::command())

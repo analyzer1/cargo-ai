@@ -114,6 +114,8 @@ Runtime lookup stays project-first:
 - ordinary `cargo ai hatch` exports only the binary; it does not copy tool artifacts next to the output
 - a hatched binary run from inside a project uses that same project-first lookup, while a run outside any project can only rely on machine-installed tools
 
+`cargo ai tools build` uses Cargo’s dev profile during authoring. Final assembly and approved package installation compile tools with the release profile, in separately identified managed artifact paths. Configure optimization through the tool’s Cargo manifest; preserve existing user profile settings. A Cargo AI build profile only selects inputs, and does not select a Cargo compile profile.
+
 If a tool should ship inside an explicit project build root, list it under `.cargo-ai/project.toml` in `[build.<profile>].tools`. `cargo ai build` only packages project-attached tools named there; it does not infer tool dependencies from agents and it does not pull machine-only tools into the build automatically.
 
 If a tool should ship inside a portable project source package, use that same `[build.<profile>].tools` list with `cargo ai package`. The package step reuses the build profile directly, copies the tool crate source plus project tool metadata, and leaves built tool binaries out of the portable package root.
@@ -167,3 +169,9 @@ If the user wants a local tool, ask the authoring assistant to:
 - use `tool-hardening.md` for dependency selection and completion review
 
 Do not invent a second tool runtime or manifest format beyond the current scaffold and `tool.json`.
+
+## Runtime Data and Relative Paths
+
+With `[runtime] data_root = ".cargo-ai/data"`, Cargo AI invokes tools with the project's `.cargo-ai/data/` as cwd, creating it at invocation time. Installed tools continue to use their alias `data/`. Without the project setting, existing cwd behavior remains. Use relative paths for mutable tool output and keep immutable assets with the project artifacts. This cwd choice is not a filesystem sandbox; accurately declare resources and obtain authorization for sensitive operations.
+
+New bridges resolve sibling child artifacts independently of the tool's data cwd. See `tool-child-agents.md`. Updating Cargo AI does not overwrite existing tool sources or bridges. Before an existing project adopts the data setting, review/rebuild its tool code and test child calls; do not copy children into data or silently replace user code to compensate for an old bridge.

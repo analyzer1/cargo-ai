@@ -1,10 +1,14 @@
 //! Runtime behavior for `cargo ai add guidance`.
 use clap::ArgMatches;
 use serde_json::json;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::ui;
+
+mod lifecycle;
+#[cfg(feature = "developer-tools")]
+pub(crate) mod packaging;
+mod transaction;
 
 const CANONICAL_GUIDANCE_TEMPLATE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -381,106 +385,46 @@ fn write_guidance_bundle(
     target_dir: &Path,
     styles: &[GuidanceStyle],
 ) -> Result<GuidanceBundleReport, String> {
-    if styles.is_empty() {
-        return Err(
-            "Missing guidance style. Use `cargo ai add guidance --style codex` or `--style claude`."
-                .to_string(),
-        );
-    }
+    lifecycle::add(target_dir, styles)
+}
 
-    let bundle_artifact_paths = GUIDANCE_ARTIFACTS
-        .iter()
-        .map(|artifact| target_dir.join(artifact.relative_path))
-        .collect::<Vec<_>>();
-
-    let mut conflicts = Vec::new();
-    let mut bundle_reused = Vec::new();
-    for (artifact, output_path) in GUIDANCE_ARTIFACTS.iter().zip(&bundle_artifact_paths) {
-        if !output_path.exists() {
-            continue;
-        }
-        match fs::read(output_path) {
-            Ok(contents) if contents == artifact.contents.as_bytes() => {
-                bundle_reused.push(output_path.clone());
-            }
-            _ => conflicts.push(output_path.display().to_string()),
-        }
-    }
-    if !conflicts.is_empty() {
-        return Err(format!(
-            "Guidance conflicts detected. The following managed file(s) differ from the installed bundle: {}. Restore, remove, or relocate the conflicting files before retrying.",
-            conflicts.join(", ")
-        ));
-    }
-
-    let mut entrypoints = Vec::new();
-    let mut written_paths = Vec::new();
-    let mut reused_paths = bundle_reused;
-    for style in styles.iter().copied() {
-        if entrypoints
-            .iter()
-            .any(|entrypoint: &GuidanceEntrypointReport| entrypoint.style == style)
-        {
-            continue;
-        }
-        let artifact = style.root_artifact();
-        let output_path = target_dir.join(artifact.relative_path);
-        let status = if !output_path.exists() {
-            write_guidance_artifact(artifact, &output_path)?;
-            written_paths.push(output_path.clone());
-            EntrypointStatus::Written
-        } else if fs::read(&output_path)
-            .map(|contents| contents == artifact.contents.as_bytes())
-            .unwrap_or(false)
-        {
-            reused_paths.push(output_path.clone());
-            EntrypointStatus::Reused
+/// Runs offline status/update without initializing user-level Cargo AI state.
+pub(crate) fn run_lifecycle(sub_m: &ArgMatches) -> bool {
+    let result = (|| {
+        let root = std::env::current_dir()
+            .map_err(|error| format!("Failed to resolve current directory: {error}"))?;
+        if sub_m.subcommand_matches("status").is_some() {
+            lifecycle::print_status(&root)
+        } else if sub_m.subcommand_matches("update").is_some() {
+            lifecycle::update(&root)
         } else {
-            EntrypointStatus::Preserved
-        };
-        entrypoints.push(GuidanceEntrypointReport {
-            style,
-            root_output_path: output_path,
-            status,
-        });
-    }
-
-    for (artifact, output_path) in GUIDANCE_ARTIFACTS.iter().zip(&bundle_artifact_paths) {
-        if output_path.exists() {
-            continue;
+            Err("Use `cargo ai guidance status` or `cargo ai guidance update`.".to_string())
         }
-        write_guidance_artifact(*artifact, output_path)?;
-        written_paths.push(output_path.clone());
+    })();
+    if let Err(error) = result {
+        eprintln!("x {error}");
+        false
+    } else {
+        true
     }
+}
 
-    Ok(GuidanceBundleReport {
-        entrypoints,
-        guidance_entry_path: target_dir.join(BUNDLE_ENTRY_PATH),
-        guidance_root: target_dir.join(".cargo-ai").join("guidance"),
-        written_paths,
-        reused_paths,
+/// Operational guidance state must never become an application asset.
+pub(crate) fn is_reserved_guidance_path(relative: &Path) -> bool {
+    let parts = relative
+        .components()
+        .filter_map(|part| part.as_os_str().to_str())
+        .collect::<Vec<_>>();
+    parts.windows(2).any(|parts| {
+        parts[0].eq_ignore_ascii_case(".cargo-ai")
+            && (parts[1].eq_ignore_ascii_case("guidance.lock")
+                || parts[1].eq_ignore_ascii_case("guidance-transaction"))
     })
 }
 
-fn write_guidance_artifact(artifact: GuidanceArtifact, output_path: &Path) -> Result<(), String> {
-    if let Some(parent) = output_path.parent() {
-        fs::create_dir_all(parent).map_err(|error| {
-            format!(
-                "Failed to create guidance directory '{}': {}",
-                parent.display(),
-                error
-            )
-        })?;
-    }
-
-    fs::write(output_path, artifact.contents).map_err(|error| {
-        format!(
-            "Failed to write guidance file '{}': {}",
-            output_path.display(),
-            error
-        )
-    })?;
-    Ok(())
+/// Classifies generated loaders without claiming ownership of user instructions.
+pub(crate) fn is_managed_entrypoint(path: &Path) -> Result<bool, String> {
+    lifecycle::is_managed_entrypoint(path)
 }
 
 /// Executes the `guidance` subcommand flow from parsed CLI arguments.
@@ -545,7 +489,7 @@ mod tests {
             Some("AGENTS.md")
         );
         assert_eq!(report.entrypoints[0].status, EntrypointStatus::Written);
-        assert_eq!(report.written_paths.len(), 23);
+        assert_eq!(report.written_paths.len(), 24);
         assert!(dir.join("AGENTS.md").exists());
         assert!(dir.join(".cargo-ai/guidance/cargo-ai.md").exists());
         assert!(dir
@@ -687,7 +631,7 @@ mod tests {
         let report = write_guidance_bundle(&dir, &[GuidanceStyle::Codex])
             .expect("guidance write should work");
         assert_eq!(report.entrypoints[0].status, EntrypointStatus::Preserved);
-        assert_eq!(report.written_paths.len(), 22);
+        assert_eq!(report.written_paths.len(), 23);
         assert_eq!(
             fs::read_to_string(dir.join("AGENTS.md")).expect("existing AGENTS should be readable"),
             "existing guidance\n"
@@ -717,6 +661,7 @@ mod tests {
         assert!(response["ui"]["sections"][1]["message"]
             .as_str()
             .expect("merge guidance should be present")
+            .replace('\\', "/")
             .contains(".cargo-ai/guidance/cargo-ai.md"));
 
         let _ = fs::remove_dir_all(dir);
@@ -738,7 +683,7 @@ mod tests {
         let error = write_guidance_bundle(&dir, &[GuidanceStyle::Codex])
             .expect_err("existing companion file should fail");
         assert!(error.contains(".cargo-ai/guidance/action-rules.md"));
-        assert!(error.contains("differ from the installed bundle"));
+        assert!(error.contains("legacy/unmanaged"));
 
         let _ = fs::remove_dir_all(dir);
     }
@@ -812,7 +757,7 @@ mod tests {
             .expect("combined guidance write should work");
 
         assert_eq!(report.entrypoints.len(), 2);
-        assert_eq!(report.written_paths.len(), 24);
+        assert_eq!(report.written_paths.len(), 25);
         assert!(dir.join("AGENTS.md").exists());
         assert!(dir.join("CLAUDE.md").exists());
         assert!(dir.join(".cargo-ai/guidance/cargo-ai.md").exists());
@@ -828,13 +773,20 @@ mod tests {
     fn write_guidance_bundle_reuses_identical_bundle_for_later_style() {
         let dir = temp_dir_path("later-style");
         fs::create_dir_all(&dir).expect("test dir should be created");
+        let dir = fs::canonicalize(dir).expect("test directory should resolve");
         write_guidance_bundle(&dir, &[GuidanceStyle::Codex])
             .expect("first guidance write should work");
 
         let report = write_guidance_bundle(&dir, &[GuidanceStyle::Claude])
             .expect("later style should reuse the shared bundle");
 
-        assert_eq!(report.written_paths, vec![dir.join("CLAUDE.md")]);
+        assert_eq!(
+            report.written_paths,
+            vec![
+                dir.join(".cargo-ai/guidance/manifest.json"),
+                dir.join("CLAUDE.md")
+            ]
+        );
         assert_eq!(report.reused_paths.len(), 22);
         assert_eq!(report.entrypoints[0].status, EntrypointStatus::Written);
 
@@ -852,7 +804,7 @@ mod tests {
             .expect("repeated style should be idempotent");
 
         assert!(report.written_paths.is_empty());
-        assert_eq!(report.reused_paths.len(), 23);
+        assert_eq!(report.reused_paths.len(), 24);
         assert_eq!(report.entrypoints[0].status, EntrypointStatus::Reused);
 
         let _ = fs::remove_dir_all(dir);

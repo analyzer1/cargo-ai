@@ -4,7 +4,7 @@ Use this as a simple text-input example you can copy into an empty folder and ha
 
 ```json
 {
-  "agent_definition_schema_version": "2026-03-03.r1",
+  "agent_definition_schema_version": "2026-09-09.r1",
   "inputs": [
     {
       "type": "text",

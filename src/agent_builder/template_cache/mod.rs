@@ -4,7 +4,7 @@ mod key;
 mod prepare;
 mod prune;
 
-use crate::agent_builder::build_target::BuildTarget;
+use crate::agent_builder::build_target::{BuildTarget, CargoCompileProfile};
 use key::{resolve_template_cache_key, TemplateCacheKey};
 use std::path::{Path, PathBuf};
 
@@ -18,6 +18,7 @@ pub(crate) struct WarmedTemplate {
 
 pub(crate) fn ensure_warmed_template_with_prepare_hook<F>(
     build_target: &BuildTarget,
+    profile: CargoCompileProfile,
     on_prepare_start: F,
 ) -> Result<WarmedTemplate, String>
 where
@@ -25,6 +26,7 @@ where
 {
     ensure_warmed_template_with_prepare_hook_and_deps(
         build_target,
+        profile,
         on_prepare_start,
         prepare::template_workspace_ready,
         prepare::prepare_warmed_template_workspace,
@@ -33,19 +35,20 @@ where
 
 fn ensure_warmed_template_with_prepare_hook_and_deps<F, G, H>(
     build_target: &BuildTarget,
+    profile: CargoCompileProfile,
     on_prepare_start: F,
     template_workspace_ready: G,
     prepare_warmed_template_workspace: H,
 ) -> Result<WarmedTemplate, String>
 where
     F: FnOnce(),
-    G: FnOnce(&Path) -> bool,
-    H: FnOnce(&Path, &BuildTarget) -> Result<(), String>,
+    G: FnOnce(&Path, &BuildTarget, CargoCompileProfile) -> bool,
+    H: FnOnce(&Path, &BuildTarget, CargoCompileProfile) -> Result<(), String>,
 {
-    let key = resolve_template_cache_key(build_target)?;
+    let key = resolve_template_cache_key(build_target, profile)?;
     let path = template_workspace_path(&key);
 
-    if template_workspace_ready(&path) {
+    if template_workspace_ready(&path, build_target, profile) {
         return Ok(WarmedTemplate {
             pruned_parent_count: prune_stale_parents(&key),
             key,
@@ -55,7 +58,7 @@ where
     }
 
     on_prepare_start();
-    prepare_warmed_template_workspace(&path, build_target)?;
+    prepare_warmed_template_workspace(&path, build_target, profile)?;
 
     Ok(WarmedTemplate {
         pruned_parent_count: prune_stale_parents(&key),
@@ -70,6 +73,7 @@ fn template_workspace_path(key: &TemplateCacheKey) -> PathBuf {
         .join(&key.binary_sha256)
         .join(&key.rustc_version)
         .join(&key.target_triple)
+        .join(key.compile_profile.name())
 }
 
 fn prune_stale_parents(key: &TemplateCacheKey) -> usize {
@@ -86,7 +90,7 @@ mod tests {
         ensure_warmed_template_with_prepare_hook_and_deps, template_workspace_path,
         TemplateCacheKey,
     };
-    use crate::agent_builder::build_target::BuildTarget;
+    use crate::agent_builder::build_target::{BuildTarget, CargoCompileProfile};
     use std::path::PathBuf;
     use std::sync::{
         atomic::{AtomicBool, Ordering},
@@ -99,14 +103,22 @@ mod tests {
             binary_sha256: "abc123".to_string(),
             rustc_version: "rustc-1.90.0".to_string(),
             target_triple: "aarch64-apple-darwin".to_string(),
+            compile_profile: CargoCompileProfile::Release,
         };
 
         let path = template_workspace_path(&key);
         let suffix = PathBuf::from("abc123")
             .join("rustc-1.90.0")
-            .join("aarch64-apple-darwin");
+            .join("aarch64-apple-darwin")
+            .join("release");
 
         assert!(path.ends_with(suffix));
+        let dev_key = TemplateCacheKey {
+            compile_profile: CargoCompileProfile::Dev,
+            ..key
+        };
+        assert_ne!(path, template_workspace_path(&dev_key));
+        assert!(template_workspace_path(&dev_key).ends_with("dev"));
     }
 
     #[test]
@@ -118,16 +130,21 @@ mod tests {
 
         let created = ensure_warmed_template_with_prepare_hook_and_deps(
             &build_target,
+            CargoCompileProfile::Release,
             {
                 let hook_called = Arc::clone(&hook_called);
                 move || {
                     hook_called.store(true, Ordering::SeqCst);
                 }
             },
-            |_| false,
+            |_, _, profile| {
+                assert_eq!(profile, CargoCompileProfile::Release);
+                false
+            },
             {
                 let prepare_called = Arc::clone(&prepare_called);
-                move |_, _| {
+                move |_, _, profile| {
+                    assert_eq!(profile, CargoCompileProfile::Release);
                     prepare_called.store(true, Ordering::SeqCst);
                     Ok(())
                 }
@@ -144,16 +161,21 @@ mod tests {
 
         let reused = ensure_warmed_template_with_prepare_hook_and_deps(
             &build_target,
+            CargoCompileProfile::Release,
             {
                 let hook_called = Arc::clone(&hook_called);
                 move || {
                     hook_called.store(true, Ordering::SeqCst);
                 }
             },
-            |_| true,
+            |_, _, profile| {
+                assert_eq!(profile, CargoCompileProfile::Release);
+                true
+            },
             {
                 let prepare_called = Arc::clone(&prepare_called);
-                move |_, _| {
+                move |_, _, profile| {
+                    assert_eq!(profile, CargoCompileProfile::Release);
                     prepare_called.store(true, Ordering::SeqCst);
                     Ok(())
                 }

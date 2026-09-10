@@ -80,6 +80,8 @@ struct BuildProfileDocument {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 struct ProjectRuntimeDocument {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    data_root: Option<String>,
     #[serde(default)]
     defaults: Option<ProjectRuntimeDefaultsDocument>,
 }
@@ -196,7 +198,7 @@ struct ProjectSourceToolContext {
 #[derive(Clone, Debug)]
 struct LoadedProjectMetadata {
     project_identity: Option<ProjectIdentityDocument>,
-    runtime_defaults: Option<ProjectRuntimeDefaultsDocument>,
+    project_runtime: Option<ProjectRuntimeDocument>,
     build_profile: BuildProfileDocument,
     package_permissions: PackagePermissionProfileDocument,
     package_dependencies: PackageDependencies,
@@ -275,7 +277,7 @@ pub(crate) fn assemble_current_project_package(
         &project_root,
         profile_name,
         loaded_metadata.project_identity.as_ref(),
-        loaded_metadata.runtime_defaults.as_ref(),
+        loaded_metadata.project_runtime.as_ref(),
         &loaded_metadata.build_profile,
         &loaded_metadata.package_permissions,
         &loaded_metadata.package_dependencies,
@@ -334,6 +336,7 @@ fn load_project_metadata(
             error
         )
     })?;
+    super::runtime_data::uses_project_data(&contents)?;
     let mut metadata: ProjectMetadataDocument = toml::from_str(&contents).map_err(|error| {
         format!(
             "Failed to parse project metadata '{}': {}",
@@ -373,7 +376,7 @@ fn load_project_metadata(
 
     Ok(LoadedProjectMetadata {
         project_identity: normalize_project_identity(metadata.project.take()),
-        runtime_defaults: metadata.runtime.and_then(|runtime| runtime.defaults),
+        project_runtime: metadata.runtime,
         build_profile: profile,
         package_permissions,
         package_dependencies: metadata.package_dependencies,
@@ -443,7 +446,7 @@ fn assemble_package_root(
     project_root: &Path,
     profile_name: &str,
     project_identity: Option<&ProjectIdentityDocument>,
-    runtime_defaults: Option<&ProjectRuntimeDefaultsDocument>,
+    project_runtime: Option<&ProjectRuntimeDocument>,
     build_profile: &BuildProfileDocument,
     package_permissions: &PackagePermissionProfileDocument,
     package_dependencies: &PackageDependencies,
@@ -505,7 +508,7 @@ fn assemble_package_root(
     write_generated_project_metadata(
         output_root.path.as_path(),
         project_identity,
-        runtime_defaults,
+        project_runtime,
         profile_name,
         &build_profile,
         package_permissions,
@@ -533,6 +536,7 @@ fn validate_output_source_boundaries(
     build_profile: &BuildProfileDocument,
     output_root: &PackageOutputRoot,
 ) -> Result<(), String> {
+    super::runtime_data::validate_output_root(project_root, &output_root.path)?;
     let mut sources = vec![(
         "Project metadata".to_string(),
         project_root.join(PROJECT_METADATA_RELATIVE_PATH),
@@ -546,14 +550,18 @@ fn validate_output_source_boundaries(
             .chain(build_profile.hatched_agents.iter().cloned())
             .collect::<Vec<_>>(),
     ) {
-        let relative_path = validate_project_relative_path(relative_path.as_str(), "Agent")?;
+        let relative_path = super::runtime_data::validate_declared_input(relative_path.as_str())?;
+        super::add::guidance::packaging::validate_declared(&relative_path)?;
+        super::runtime_data::validate_source_tree(project_root, &relative_path, false)?;
         let source_path = project_root.join(relative_path);
         validate_project_source_path(project_root, &source_path, "Agent")?;
         sources.push(("Agent".to_string(), source_path));
     }
 
     for relative_path in &build_profile.assets {
-        let relative_path = validate_project_relative_path(relative_path, "Asset")?;
+        let relative_path = super::runtime_data::validate_declared_input(relative_path)?;
+        super::add::guidance::packaging::validate_declared(&relative_path)?;
+        super::runtime_data::validate_source_tree(project_root, &relative_path, false)?;
         let source_path = project_root.join(relative_path);
         validate_project_source_path(project_root, &source_path, "Asset")?;
         sources.push(("Asset".to_string(), source_path));
@@ -561,6 +569,9 @@ fn validate_output_source_boundaries(
 
     for tool_name in &build_profile.tools {
         let context = load_project_source_tool_context(project_root, tool_name)?;
+        let source =
+            super::runtime_data::validate_declared_input(&context.source_root_relative_path)?;
+        super::runtime_data::validate_source_tree(project_root, &source, true)?;
         let tool_manifest_path = crate::commands::tools::project_tools_root(project_root)
             .join(tool_name)
             .join("tool.json");
@@ -882,7 +893,7 @@ fn write_package_tool_manifest(
 fn write_generated_project_metadata(
     package_root: &Path,
     project_identity: Option<&ProjectIdentityDocument>,
-    runtime_defaults: Option<&ProjectRuntimeDefaultsDocument>,
+    project_runtime: Option<&ProjectRuntimeDocument>,
     profile_name: &str,
     build_profile: &BuildProfileDocument,
     package_permissions: &PackagePermissionProfileDocument,
@@ -904,11 +915,7 @@ fn write_generated_project_metadata(
     let document = GeneratedProjectMetadataDocument {
         format_version: 1,
         project: project_identity.cloned(),
-        runtime: runtime_defaults
-            .cloned()
-            .map(|defaults| ProjectRuntimeDocument {
-                defaults: Some(defaults),
-            }),
+        runtime: project_runtime.cloned(),
         tools: GeneratedProjectToolsPolicyDocument {
             allow_global_fallback: false,
         },
@@ -976,6 +983,8 @@ fn copy_declared_path(
     package_root: &Path,
     require_json_file: bool,
 ) -> Result<(), String> {
+    super::runtime_data::validate_declared_input(relative_path)?;
+    super::add::guidance::packaging::validate_declared(Path::new(relative_path))?;
     let relative_path = validate_project_relative_path(
         relative_path,
         if require_json_file { "Agent" } else { "Asset" },
@@ -1008,7 +1017,12 @@ fn copy_declared_path(
 
     let dest_path = package_root.join(&relative_path);
     if source_metadata.is_dir() {
-        copy_directory_recursive(project_root, source_path.as_path(), dest_path.as_path())
+        copy_directory_recursive(
+            project_root,
+            source_path.as_path(),
+            dest_path.as_path(),
+            super::add::guidance::packaging::is_bundle_path(&relative_path),
+        )
     } else {
         copy_file(project_root, source_path.as_path(), dest_path.as_path())
     }
@@ -1066,7 +1080,12 @@ fn copy_tool_source_root(
     )
 }
 
-fn copy_directory_recursive(project_root: &Path, source: &Path, dest: &Path) -> Result<(), String> {
+fn copy_directory_recursive(
+    project_root: &Path,
+    source: &Path,
+    dest: &Path,
+    declared_bundle: bool,
+) -> Result<(), String> {
     let metadata = validate_project_source_path(project_root, source, "Packaged directory")?;
     if !metadata.is_dir() {
         return Err(format!(
@@ -1098,9 +1117,25 @@ fn copy_directory_recursive(project_root: &Path, source: &Path, dest: &Path) -> 
         })?;
         let source_path = entry.path();
         let dest_path = dest.join(entry.file_name());
+        if super::runtime_data::is_runtime_data(
+            source_path
+                .strip_prefix(project_root)
+                .map_err(|error| error.to_string())?,
+        ) {
+            continue;
+        }
+        if super::add::guidance::packaging::skip_entry(project_root, &source_path, declared_bundle)?
+        {
+            continue;
+        }
         let metadata = validate_project_source_path(project_root, &source_path, "Packaged entry")?;
         if metadata.is_dir() {
-            copy_directory_recursive(project_root, source_path.as_path(), dest_path.as_path())?;
+            copy_directory_recursive(
+                project_root,
+                source_path.as_path(),
+                dest_path.as_path(),
+                declared_bundle,
+            )?;
         } else if metadata.is_file() {
             copy_file(project_root, source_path.as_path(), dest_path.as_path())?;
         } else {
@@ -1150,6 +1185,16 @@ fn copy_directory_recursive_skipping_target(
         })?;
         let source_path = entry.path();
         let dest_path = dest.join(entry.file_name());
+        if super::runtime_data::is_runtime_data(
+            source_path
+                .strip_prefix(project_root)
+                .map_err(|error| error.to_string())?,
+        ) {
+            continue;
+        }
+        if super::add::guidance::packaging::skip_entry(project_root, &source_path, false)? {
+            continue;
+        }
         let metadata =
             validate_project_source_path(project_root, &source_path, "Tool source entry")?;
         if metadata.is_dir()
@@ -1647,7 +1692,7 @@ assets = ["assets/prompts/"]
             &project_root,
             "default",
             loaded_metadata.project_identity.as_ref(),
-            loaded_metadata.runtime_defaults.as_ref(),
+            loaded_metadata.project_runtime.as_ref(),
             &loaded_metadata.build_profile,
             &loaded_metadata.package_permissions,
             &loaded_metadata.package_dependencies,
@@ -1785,7 +1830,7 @@ tools = ["machine_only"]
             &project_root,
             "default",
             loaded_metadata.project_identity.as_ref(),
-            loaded_metadata.runtime_defaults.as_ref(),
+            loaded_metadata.project_runtime.as_ref(),
             &loaded_metadata.build_profile,
             &loaded_metadata.package_permissions,
             &loaded_metadata.package_dependencies,
@@ -1829,7 +1874,7 @@ assets = ["target"]
             &project_root,
             "default",
             loaded_metadata.project_identity.as_ref(),
-            loaded_metadata.runtime_defaults.as_ref(),
+            loaded_metadata.project_runtime.as_ref(),
             &loaded_metadata.build_profile,
             &loaded_metadata.package_permissions,
             &loaded_metadata.package_dependencies,
@@ -1878,7 +1923,7 @@ assets = ["assets"]
             &project_root,
             "default",
             loaded_metadata.project_identity.as_ref(),
-            loaded_metadata.runtime_defaults.as_ref(),
+            loaded_metadata.project_runtime.as_ref(),
             &loaded_metadata.build_profile,
             &loaded_metadata.package_permissions,
             &loaded_metadata.package_dependencies,
@@ -1929,7 +1974,7 @@ assets = ["assets/linked.txt"]
             &project_root,
             "default",
             loaded_metadata.project_identity.as_ref(),
-            loaded_metadata.runtime_defaults.as_ref(),
+            loaded_metadata.project_runtime.as_ref(),
             &loaded_metadata.build_profile,
             &loaded_metadata.package_permissions,
             &loaded_metadata.package_dependencies,
@@ -1961,7 +2006,7 @@ assets = ["assets/linked.txt"]
             &project_root,
             "default",
             loaded_metadata.project_identity.as_ref(),
-            loaded_metadata.runtime_defaults.as_ref(),
+            loaded_metadata.project_runtime.as_ref(),
             &loaded_metadata.build_profile,
             &loaded_metadata.package_permissions,
             &loaded_metadata.package_dependencies,

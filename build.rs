@@ -26,12 +26,20 @@ const TEMPLATE_SOURCES: &[TemplateSource] = &[
         source: "build_support.rs",
     },
     TemplateSource {
+        destination: "definition_validation.rs",
+        source: "definition_validation.rs",
+    },
+    TemplateSource {
         destination: ".agentcfg",
         source: ".agentcfg",
     },
     TemplateSource {
         destination: "Cargo.toml",
         source: "Targo.toml",
+    },
+    TemplateSource {
+        destination: "src/runtime_data.rs",
+        source: "src/runtime_data.rs",
     },
     TemplateSource {
         destination: "src/main.rs",

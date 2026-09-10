@@ -2309,66 +2309,11 @@ pub(crate) fn resolve_package_data_path(
         format!("Package `{}` data path", context.alias).as_str(),
     )?;
 
-    let data_root_exists = match fs::symlink_metadata(&context.package_data_root) {
-        Ok(metadata) if metadata_is_link_like(&metadata) || !metadata.is_dir() => {
-            return Err(format!(
-                "Package `{}` data root '{}' must be a real directory and not a symbolic link or reparse point.",
-                context.alias,
-                context.package_data_root.display()
-            ));
-        }
-        Ok(_) => true,
-        Err(error) if error.kind() == ErrorKind::NotFound => false,
-        Err(error) => {
-            return Err(format!(
-                "Failed to inspect package `{}` data root '{}': {}",
-                context.alias,
-                context.package_data_root.display(),
-                error
-            ));
-        }
-    };
-
-    let mut resolved = context.package_data_root.clone();
-    let mut inspect_existing_components = data_root_exists;
-    for component in relative_path.components() {
-        match component {
-            Component::CurDir => continue,
-            Component::Normal(segment) => resolved.push(segment),
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(format!(
-                    "Package `{}` data path must be a non-empty relative path.",
-                    context.alias
-                ));
-            }
-        }
-        if !inspect_existing_components {
-            continue;
-        }
-        match fs::symlink_metadata(&resolved) {
-            Ok(metadata) if metadata_is_link_like(&metadata) => {
-                return Err(format!(
-                    "Package `{}` data path '{}' must not traverse symbolic link or reparse point '{}'.",
-                    context.alias,
-                    relative_path.display(),
-                    resolved.display()
-                ));
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == ErrorKind::NotFound => {
-                inspect_existing_components = false;
-            }
-            Err(error) => {
-                return Err(format!(
-                    "Failed to inspect package `{}` data path component '{}': {}",
-                    context.alias,
-                    resolved.display(),
-                    error
-                ));
-            }
-        }
-    }
-    Ok(resolved)
+    super::runtime_data::confined_path(
+        &context.package_data_root,
+        &relative_path,
+        &format!("Package `{}` data path", context.alias),
+    )
 }
 
 fn permission_profile_lines(permissions: &PackagePermissionProfileDocument) -> Vec<String> {
@@ -3985,6 +3930,7 @@ assets = ["schemas/customer.sql"]
                 .join(tool_name)
                 .join("bin")
                 .join(target)
+                .join("release")
                 .as_path(),
             tool_name,
         )
