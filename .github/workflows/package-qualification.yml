@@ -115,49 +115,23 @@ jobs:
           path: cargo-ai
           persist-credentials: false
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable, resolved 2026-08-02
+
+      - name: Remove checkout authority before candidate helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config --global --unset-all http.https://github.com/.extraheader || true
+          git -C cargo-ai config --local --unset-all http.https://github.com/.extraheader || true
+
       - name: Resolve allowlisted package identity
         id: package
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import os, re, tomllib
-          from pathlib import Path
-
-          catalog = tomllib.loads(Path("cargo-ai/.github/package-qualification-catalog.toml").read_text())
-          rows = catalog.get("qualification_canaries", []) + catalog.get("official_packages", [])
-          requested_repo = os.environ.get("REQUESTED_PACKAGE_REPOSITORY", "").strip()
-          requested_sha = os.environ.get("REQUESTED_PACKAGE_SHA", "").strip()
-          requested_declaration = os.environ.get("REQUESTED_DECLARATION_PATH", "").strip()
-
-          if requested_repo:
-              matches = [row for row in rows if row.get("repository") == requested_repo]
-              if len(matches) != 1:
-                  raise SystemExit("requested package repository is not uniquely allowlisted")
-              row = matches[0]
-              package_sha = requested_sha
-          else:
-              matches = [row for row in catalog.get("qualification_canaries", []) if row.get("enabled") and row.get("release_required")]
-              if len(matches) != 1:
-                  raise SystemExit("catalog must contain exactly one enabled release-required qualification canary")
-              row = matches[0]
-              requested_repo = row["repository"]
-              package_sha = row.get("revision", "")
-
-          if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", requested_repo):
-              raise SystemExit("package repository is not portable")
-          if not re.fullmatch(r"[0-9a-f]{40}", package_sha):
-              raise SystemExit("package revision must be an exact lowercase 40-character commit")
-          declaration = requested_declaration or row.get("declaration_path", "")
-          if not declaration or declaration.startswith(("/", "\\")) or ".." in Path(declaration).parts:
-              raise SystemExit("declaration path must remain package-relative")
-
-          output = Path(os.environ["GITHUB_OUTPUT"])
-          with output.open("a") as stream:
-              stream.write(f"repository={requested_repo}\n")
-              stream.write(f"sha={package_sha}\n")
-              stream.write(f"declaration={declaration}\n")
-          PY
+          CATALOG_PATH=cargo-ai/.github/package-qualification-catalog.toml \
+            cargo run --locked --manifest-path cargo-ai/Cargo.toml --example qualification-gate -- catalog
 
       - name: Check out exact public package source anonymously
         shell: bash
@@ -172,9 +146,6 @@ jobs:
           git -C package fetch --depth=1 origin "$PACKAGE_SHA"
           [[ "$(git -C package rev-parse FETCH_HEAD)" == "$PACKAGE_SHA" ]]
           git -C package checkout --detach FETCH_HEAD
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable, resolved 2026-08-02
 
       - name: Remove checkout authority before package code
         shell: bash

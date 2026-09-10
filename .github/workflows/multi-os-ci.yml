@@ -88,7 +88,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Check qualification policy
-        run: python3 -m unittest discover -s .github/scripts -p 'test_qualification_policy.py'
+        run: cargo test --locked --test qualification_policy
 
       - name: Check formatting
         run: cargo fmt --all -- --check

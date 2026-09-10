@@ -2,6 +2,9 @@
 
 #[path = "support/provider_cache.rs"]
 mod provider_cache;
+#[path = "support/qualification_policy.rs"]
+#[allow(dead_code)]
+mod qualification_policy;
 #[path = "support/qualification_report.rs"]
 mod qualification_report;
 
@@ -1836,17 +1839,23 @@ fn qualification_probe_case(provider: &str, mock: MockServer, expected: &str) {
         assert!(strict_live_probe(&output).is_err());
     }
     // Exercise the actual producer/consumer boundary without a real workflow or service.
-    let policy = Command::new("python3").arg("-c").arg(
-        "import json,sys; sys.path.insert(0,sys.argv[1]); from qualification_policy import evaluate; from pathlib import Path; raw=Path(sys.argv[2]).read_text(); r=json.loads(raw); d=evaluate(r['provider'],raw,candidate='a'*40,run_id='123',run_attempt='2',probe_id='b'*32); print(str(d['accepted']).lower())"
-    ).arg(Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/scripts")).arg(&report.path).output().unwrap();
-    assert!(policy.status.success());
+    let raw = fs::read(&report.path).unwrap();
+    let decision = qualification_policy::evaluate(
+        provider,
+        &raw,
+        &qualification_policy::Identity {
+            candidate: &"a".repeat(40),
+            run_id: "123",
+            run_attempt: "2",
+            probe_id: Some(&"b".repeat(32)),
+        },
+        "success",
+        "true",
+    )
+    .unwrap();
     assert_eq!(
-        String::from_utf8(policy.stdout).unwrap().trim(),
-        if expected == "pass" || expected == "rate_limited" {
-            "true"
-        } else {
-            "false"
-        }
+        decision.accepted,
+        expected == "pass" || expected == "rate_limited"
     );
 
     if expected == "pass" && provider == "mistral" {

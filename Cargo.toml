@@ -15,6 +15,14 @@ categories = [
 ]
 build = "build.rs"
 
+[[example]]
+name = "qualification-gate"
+path = "tests/support/qualification_gate.rs"
+
+# Streaming cache inventories must not spend the test budget in debug SHA rounds.
+[profile.test.package.sha2]
+opt-level = 3
+
 [features]
 default = ["developer-tools"]
 developer-tools = []

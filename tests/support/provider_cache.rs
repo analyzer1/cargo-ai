@@ -68,7 +68,7 @@ fn inventory(root: &Path) -> io::Result<BTreeMap<PathBuf, Entry>> {
             path.strip_prefix(root).unwrap().to_path_buf(),
             Entry {
                 digest: if metadata.is_file() {
-                    Some(String::new())
+                    Some(digest(path)?)
                 } else {
                     None
                 },
@@ -89,29 +89,6 @@ fn inventory(root: &Path) -> io::Result<BTreeMap<PathBuf, Entry>> {
     }
     let mut entries = BTreeMap::new();
     visit(root, root, &mut entries)?;
-    // CI already uses Python. Its native hashing avoids unoptimized test-binary
-    // hashing dominating the cost of copying a complete compilation cache.
-    let output = Command::new("python3")
-        .args(["-c", include_str!("cache_digests.py")])
-        .arg(root)
-        .output()?;
-    if !output.status.success() {
-        return Err(io::Error::other("disposable cache inventory failed"));
-    }
-    let mut hashes: BTreeMap<PathBuf, String> = serde_json::from_slice(&output.stdout)
-        .map_err(|_| io::Error::other("invalid cache digest inventory"))?;
-    for (path, entry) in &mut entries {
-        if entry.digest.is_some() {
-            let hash = hashes
-                .remove(path)
-                .filter(|h| h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit()))
-                .ok_or_else(|| io::Error::other("missing cache digest"))?;
-            entry.digest = Some(hash);
-        }
-    }
-    if !hashes.is_empty() {
-        return Err(io::Error::other("unexpected cache digest"));
-    }
     Ok(entries)
 }
 
@@ -258,6 +235,127 @@ impl SeedCache {
 mod tests {
     use super::*;
     use crate::Fixture;
+
+    #[test]
+    fn streaming_inventory_checks_known_hashes_unicode_and_byte_changes() {
+        let fixture = Fixture::new();
+        let empty = fixture.home.join("empty");
+        let abc = fixture.home.join("café-東京");
+        fs::write(&empty, b"").unwrap();
+        fs::write(&abc, b"abc").unwrap();
+        assert_eq!(
+            digest(&empty).unwrap(),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            digest(&abc).unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        for (length, expected) in [
+            (
+                65535,
+                "09ab7495d3e61a76f0deb12cb0306f0696cbb17ffc12131368c7a939f12f56d3",
+            ),
+            (
+                65536,
+                "1f8745f0d2d1387ec1af2211a3cf417b2e9e885e853472649c1d979d0e9370e3",
+            ),
+            (
+                65537,
+                "1abe08ebecf1c18cab71f6fe28aaddf20268f85bad78bb9a72f88ca47c874662",
+            ),
+        ] {
+            let path = fixture.home.join(length.to_string());
+            let bytes = vec![b'x'; length];
+            fs::write(&path, &bytes).unwrap();
+            assert_eq!(digest(&path).unwrap(), expected);
+        }
+        let before = inventory(&fixture.home).unwrap();
+        assert_eq!(before.len(), 6);
+        let modified = fs::metadata(&abc).unwrap().modified().unwrap();
+        fs::write(&abc, b"abd").unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&abc)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        assert_ne!(
+            inventory(&fixture.home).unwrap(),
+            before,
+            "same length and timestamp must not conceal changed bytes"
+        );
+    }
+
+    #[test]
+    #[ignore = "explicit test-owned seed path required for bounded performance diagnosis"]
+    fn measures_retained_seed_hash_copy_and_recipient_compilation() {
+        let home = PathBuf::from(
+            std::env::var_os("CARGO_AI_TEST_SEED_HOME").expect("explicit disposable seed required"),
+        );
+        let only_dir = |path: &Path| {
+            let paths = fs::read_dir(path)
+                .unwrap()
+                .map(|e| e.unwrap().path())
+                .collect::<Vec<_>>();
+            assert_eq!(paths.len(), 1);
+            plain_metadata(&paths[0]).unwrap();
+            paths[0].clone()
+        };
+        let binary = only_dir(&home.join("templates"));
+        let rustc = only_dir(&binary);
+        let target = only_dir(&rustc);
+        let identity = CacheIdentity {
+            binary: binary.file_name().unwrap().to_str().unwrap().into(),
+            rustc: rustc.file_name().unwrap().to_str().unwrap().into(),
+            target: target.file_name().unwrap().to_str().unwrap().into(),
+        };
+        let started = std::time::Instant::now();
+        let cache = SeedCache::capture(&home, identity.clone()).unwrap();
+        eprintln!(
+            "retained seed: {} files; hash {:.3}s",
+            cache
+                .entries
+                .values()
+                .filter(|e| e.digest.is_some())
+                .count(),
+            started.elapsed().as_secs_f64()
+        );
+        let recipient = Fixture::new();
+        let started = std::time::Instant::now();
+        cache.copy_into(&recipient.home, &identity).unwrap();
+        eprintln!(
+            "retained seed copy + source/destination validation: {:.3}s",
+            started.elapsed().as_secs_f64()
+        );
+        let started = std::time::Instant::now();
+        let workspace = recipient
+            .home
+            .join("templates")
+            .join(identity.relative_path());
+        let output = Command::new("cargo")
+            .args(["build", "--offline", "--release"])
+            .current_dir(&workspace)
+            .env_remove("CARGO_TARGET_DIR")
+            .output()
+            .unwrap();
+        eprintln!(
+            "recipient compilation: {:.3}s\n{}",
+            started.elapsed().as_secs_f64(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.status.success());
+        assert!(
+            !String::from_utf8_lossy(&output.stderr).contains("Compiling serde "),
+            "dependency reuse must remain effective"
+        );
+        let started = std::time::Instant::now();
+        cache.unchanged().unwrap();
+        eprintln!(
+            "retained seed final immutable verification: {:.3}s",
+            started.elapsed().as_secs_f64()
+        );
+    }
 
     fn seed(fixture: &Fixture) -> (CacheIdentity, PathBuf) {
         let identity = CacheIdentity {

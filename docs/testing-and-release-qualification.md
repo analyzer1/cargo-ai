@@ -48,12 +48,15 @@ export RUST_TEST_THREADS=1
 ```
 
 ```bash
+cargo test --locked --test qualification_policy
 cargo test --locked --test product_conformance
 cargo test --locked --test provider_smoke
 cargo test --locked --test content_package_qualification
 ```
 
-No command above needs a provider key or Cargo AI account credential, and each process test uses a temporary `CARGO_AI_HOME`.
+No command above needs a provider key or Cargo AI account credential, and each process test uses a temporary `CARGO_AI_HOME`. Qualification rules, report validation, summary rendering, package-catalog resolution and cache hashing run in Rust; this path requires no Python interpreter. The `qualification_policy` target builds and exercises the real maintainer-only `qualification-gate` Cargo example with synthetic inputs. The example is not an installed product command. CI retains YAML and bounded shell for checkout, job retrieval and routing.
+
+The example routes `probe <provider>`, `aggregate` and `catalog` using the workflow’s explicit inputs. Only protected live jobs invoke probe mode. Aggregate mode requires candidate/run/job identity, matching dependency outputs and the candidate catalog before writing a passing summary. Catalog mode validates an allowlisted exact revision and a portable package-relative declaration before package checkout. Helper/build/output failures remain failures.
 
 ## Maintainer provider testing
 
@@ -86,7 +89,7 @@ Generated-provider parity cases hatch and run complete standalone executables ag
 cargo test --locked --test provider_smoke generated_provider_batch_isolated_and_deterministic -- --ignored --exact --nocapture
 ```
 
-The batch prepares a neutral release seed, then copies its compatible template/compiler cache into each fresh case home. It preserves timestamps and executable permissions, verifies immutable seed digests with the CI Python 3 standard library, and transfers no credentials or provider-case state. Every generated application is still assembled and executed. The six individually selectable cases remain available for diagnosis:
+The batch prepares a neutral release seed, then copies its compatible template/compiler cache into each fresh case home. It preserves timestamps and executable permissions, verifies immutable seed SHA-256 digests in Rust, and transfers no credentials or provider-case state. Every generated application is still assembled and executed. The six individually selectable cases remain available for diagnosis:
 
 ```bash
 cargo test --locked --test provider_smoke generated_openai_smoke_isolated_and_deterministic -- --ignored --exact
